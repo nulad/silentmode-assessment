@@ -32,11 +32,12 @@ describe('ClientRegistry', () => {
     });
 
     it('should prevent duplicate clientIds', () => {
-      const client1 = registry.addClient('client1', mockWs);
+      registry.addClient('client1', mockWs);
       const mockWs2 = { ...mockWs, readyState: 1 };
       const client2 = registry.addClient('client1', mockWs2);
 
       expect(registry.getAllClients()).toHaveLength(1);
+      expect(registry.getClient('client1').ws).not.toBe(mockWs);
       expect(registry.getClient('client1').ws).toBe(mockWs2);
     });
   });

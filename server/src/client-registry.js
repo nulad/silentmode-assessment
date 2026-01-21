@@ -13,8 +13,8 @@ class ClientRegistry {
    */
   addClient(clientId, ws, metadata = {}) {
     if (this.clients.has(clientId)) {
-      logger.warn(`Attempted to add duplicate client: ${clientId}`);
-      return false;
+      logger.warn(`Client ${clientId} already exists, removing old connection`);
+      this.removeClient(clientId);
     }
 
     const client = {
@@ -99,7 +99,7 @@ class ClientRegistry {
    */
   isClientConnected(clientId) {
     const client = this.clients.get(clientId);
-    return client && client.status === 'connected';
+    return !!(client && client.status === 'connected');
   }
 
   /**
