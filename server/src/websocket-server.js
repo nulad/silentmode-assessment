@@ -1,12 +1,14 @@
 const WebSocket = require('ws');
 const logger = require('./utils/logger');
 const config = require('./config');
-const { MESSAGE_TYPES, validateMessage } = require('../../shared/protocol');
+const { MESSAGE_TYPES, validateMessage, ERROR_CODES } = require('../../shared/protocol');
+const DownloadManager = require('./download-manager');
 
 class WebSocketServer {
   constructor() {
     this.wss = null;
     this.clients = new Map();
+    this.downloadManager = new DownloadManager();
   }
 
   start() {
@@ -84,6 +86,9 @@ class WebSocketServer {
         case MESSAGE_TYPES.DOWNLOAD_REQUEST:
           this.handleDownloadRequest(clientId, message);
           break;
+        case MESSAGE_TYPES.DOWNLOAD_ACK:
+          this.handleDownloadAck(clientId, message);
+          break;
         case MESSAGE_TYPES.RETRY_CHUNK:
           this.handleRetryChunk(clientId, message);
           break;
@@ -119,17 +124,50 @@ class WebSocketServer {
   }
 
   handleDownloadRequest(clientId, message) {
-    logger.info(`Download request from ${clientId} for file: ${message.filePath}`);
-    // This will be implemented in the file transfer module
-    this.sendToClient(clientId, {
-      type: MESSAGE_TYPES.DOWNLOAD_ACK,
-      success: false,
-      fileId: '',
-      totalChunks: 0,
-      fileSize: 0,
-      checksum: '',
-      message: 'File transfer not yet implemented'
+    logger.info(`Download request initiated for client: ${message.clientId}, file: ${message.filePath}`);
+    
+    // Generate a unique request ID if not provided
+    const requestId = message.requestId || `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    
+    // Create download in manager
+    this.downloadManager.createDownload(message.clientId, message.filePath, requestId);
+    
+    // Find the target client
+    let targetClientId = null;
+    for (const [cid, client] of this.clients.entries()) {
+      if (client.registeredId === message.clientId) {
+        targetClientId = cid;
+        break;
+      }
+    }
+    
+    if (!targetClientId) {
+      logger.error(`Target client ${message.clientId} not found`);
+      this.downloadManager.failDownload(requestId, new Error('Client not connected'));
+      return;
+    }
+    
+    // Send DOWNLOAD_REQUEST to target client
+    this.sendToClient(targetClientId, {
+      type: MESSAGE_TYPES.DOWNLOAD_REQUEST,
+      requestId: requestId,
+      filePath: message.filePath
     });
+    
+    logger.info(`Sent DOWNLOAD_REQUEST ${requestId} to client ${message.clientId}`);
+  }
+
+  handleDownloadAck(clientId, message) {
+    logger.info(`Received DOWNLOAD_ACK from ${clientId} for request ${message.requestId}`);
+    
+    const client = this.clients.get(clientId);
+    if (!client) {
+      logger.error(`Received DOWNLOAD_ACK from unknown client: ${clientId}`);
+      return;
+    }
+    
+    // Forward to download manager for processing
+    this.downloadManager.handleDownloadAck(message.requestId, message);
   }
 
   handleRetryChunk(clientId, message) {
@@ -211,6 +249,42 @@ class WebSocketServer {
       ip: client.ip,
       connectedAt: client.connectedAt
     }));
+  }
+
+  /**
+   * Trigger a download to a specific client (for testing/CLI)
+   * @param {string} clientId - Target client ID
+   * @param {string} filePath - File path to download
+   * @returns {string} Request ID
+   */
+  triggerDownload(clientId, filePath) {
+    const requestId = `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    
+    // Create download in manager
+    this.downloadManager.createDownload(clientId, filePath, requestId);
+    
+    // Find the target client
+    let targetClientId = null;
+    for (const [cid, client] of this.clients.entries()) {
+      if (client.registeredId === clientId) {
+        targetClientId = cid;
+        break;
+      }
+    }
+    
+    if (!targetClientId) {
+      throw new Error(`Client ${clientId} not found`);
+    }
+    
+    // Send DOWNLOAD_REQUEST to target client
+    this.sendToClient(targetClientId, {
+      type: MESSAGE_TYPES.DOWNLOAD_REQUEST,
+      requestId: requestId,
+      filePath: filePath
+    });
+    
+    logger.info(`Triggered download ${requestId} for client ${clientId}, file: ${filePath}`);
+    return requestId;
   }
 }
 

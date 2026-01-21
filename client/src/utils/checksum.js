@@ -1,12 +1,12 @@
-const crypto = require('crypto');
-const fs = require('fs');
+import crypto from 'crypto';
+import { createReadStream } from 'fs';
 
 /**
  * Calculate SHA-256 checksum of a buffer
  * @param {Buffer} buffer - Data to hash
  * @returns {string} Hexadecimal SHA-256 hash
  */
-function calculateChecksum(buffer) {
+export function calculateChecksum(buffer) {
   return crypto.createHash('sha256').update(buffer).digest('hex');
 }
 
@@ -15,10 +15,10 @@ function calculateChecksum(buffer) {
  * @param {string} filePath - Path to the file
  * @returns {Promise<string>} Hexadecimal SHA-256 hash
  */
-async function calculateFileChecksum(filePath) {
+export async function calculateFileChecksum(filePath) {
   return new Promise((resolve, reject) => {
     const hash = crypto.createHash('sha256');
-    const stream = fs.createReadStream(filePath);
+    const stream = createReadStream(filePath);
     
     stream.on('data', (data) => {
       hash.update(data);
@@ -40,13 +40,7 @@ async function calculateFileChecksum(filePath) {
  * @param {string} expectedChecksum - Expected SHA-256 hash
  * @returns {boolean} True if checksums match
  */
-function verifyChecksum(data, expectedChecksum) {
+export function verifyChecksum(data, expectedChecksum) {
   const actualChecksum = calculateChecksum(Buffer.isBuffer(data) ? data : Buffer.from(data));
   return actualChecksum === expectedChecksum;
 }
-
-module.exports = {
-  calculateChecksum,
-  calculateFileChecksum,
-  verifyChecksum
-};

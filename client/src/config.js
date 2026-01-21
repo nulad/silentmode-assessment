@@ -6,7 +6,7 @@ import logger from './utils/logger.js';
 // Load environment variables
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-dotenv.config({ path: join(__dirname, '../../.env') });
+dotenv.config();
 
 // Validate required configuration
 if (!process.env.CLIENT_ID) {
