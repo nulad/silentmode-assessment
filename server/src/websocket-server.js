@@ -56,15 +56,9 @@ class WebSocketServer {
     ws.on('error', (error) => {
       logger.error(`Client ${clientId} error:`, error);
     });
-
-    this.sendToClient(clientId, {
-      type: MESSAGE_TYPES.REGISTER_ACK,
-      success: true,
-      message: 'Connected to SilentMode server'
-    });
   }
 
-  handleMessage(clientId, data) {
+  async handleMessage(clientId, data) {
     try {
       const message = JSON.parse(data.toString());
       logger.debug(`Received message from ${clientId}:`, message.type);
@@ -86,7 +80,7 @@ class WebSocketServer {
           this.handleDownloadAck(clientId, message);
           break;
         case MESSAGE_TYPES.FILE_CHUNK:
-          this.handleFileChunk(clientId, message);
+          await this.handleFileChunk(clientId, message);
           break;
         case MESSAGE_TYPES.DOWNLOAD_COMPLETE:
           this.handleDownloadComplete(clientId, message);
@@ -184,7 +178,7 @@ class WebSocketServer {
     }
   }
 
-  handleFileChunk(clientId, message) {
+  async handleFileChunk(clientId, message) {
     logger.debug(`Received FILE_CHUNK from ${clientId} for request ${message.requestId}, chunk ${message.chunkIndex + 1}/${message.totalChunks}`);
     
     const client = this.clients.get(clientId);
@@ -194,12 +188,17 @@ class WebSocketServer {
     }
     
     // Forward to download manager for processing
-    this.downloadManager.handleFileChunk(message.requestId, message);
+    const result = await this.downloadManager.handleFileChunk(message.requestId, message);
     
-    // Forward chunk to the requester
-    const download = this.downloadManager.getDownload(message.requestId);
-    if (download && download.requesterClientId) {
-      this.sendToClient(download.requesterClientId, message);
+    // Forward chunk to the requester only if processing was successful
+    if (result && result.success) {
+      const download = this.downloadManager.getDownload(message.requestId);
+      if (download && download.requesterClientId) {
+        this.sendToClient(download.requesterClientId, message);
+      }
+    } else if (result && result.needsRetry) {
+      // TODO: Implement retry logic
+      logger.warn(`Chunk ${message.chunkIndex} failed processing, retry needed`);
     }
   }
 
