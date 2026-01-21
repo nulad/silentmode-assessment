@@ -183,12 +183,15 @@ class WebSocketClient {
         }
       }
       
+      // Small delay to ensure server has processed all chunks
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
       // Send DOWNLOAD_COMPLETE message
       this.send({
         type: MESSAGE_TYPES.DOWNLOAD_COMPLETE,
         requestId: fileId,
-        success: true,
-        message: 'File transfer completed successfully',
+        totalChunks: fileInfo.totalChunks,
+        fileChecksum: fileInfo.checksum,
         timestamp: new Date().toISOString()
       });
       
@@ -197,13 +200,12 @@ class WebSocketClient {
     } catch (error) {
       logger.error(`Error sending file chunks: ${error.message}`);
       
-      // Send DOWNLOAD_COMPLETE with error
+      // Send ERROR message instead of DOWNLOAD_COMPLETE for failures
       this.send({
-        type: MESSAGE_TYPES.DOWNLOAD_COMPLETE,
-        requestId: fileId,
-        success: false,
+        type: MESSAGE_TYPES.ERROR,
+        code: 'FILE_TRANSFER_FAILED',
         message: `File transfer failed: ${error.message}`,
-        timestamp: new Date().toISOString()
+        details: { requestId: fileId }
       });
     }
   }

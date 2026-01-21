@@ -204,7 +204,7 @@ class WebSocketServer {
   }
 
   handleDownloadComplete(clientId, message) {
-    logger.info(`Received DOWNLOAD_COMPLETE from ${clientId} for request ${message.requestId}, success: ${message.success}`);
+    logger.info(`Received DOWNLOAD_COMPLETE from ${clientId} for request ${message.requestId}, totalChunks: ${message.totalChunks}`);
     
     const client = this.clients.get(clientId);
     if (!client) {

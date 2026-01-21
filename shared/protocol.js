@@ -79,8 +79,9 @@ const MESSAGE_SCHEMAS = {
   },
   [MESSAGE_TYPES.DOWNLOAD_COMPLETE]: {
     requestId: 'string',
-    success: 'boolean',
-    message: 'string'
+    totalChunks: 'number',
+    fileChecksum: 'string',
+    timestamp: 'string'
   },
   [MESSAGE_TYPES.CANCEL_DOWNLOAD]: {
     requestId: 'string',
