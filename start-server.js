@@ -7,8 +7,8 @@
 // Set environment variables for testing
 process.env.LOG_LEVEL = 'info';
 
-const WebSocketServer = require('./server/src/websocket-server');
-const logger = require('./server/src/utils/logger');
+import WebSocketServer from './server/src/websocket-server.js';
+import logger from './server/src/utils/logger.js';
 
 const server = new WebSocketServer();
 

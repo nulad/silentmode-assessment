@@ -1,7 +1,9 @@
-require('dotenv').config();
-const logger = require('./utils/logger');
-const path = require('path');
-const fs = require('fs');
+import dotenv from 'dotenv';
+import logger from './utils/logger.js';
+import path from 'path';
+import fs from 'fs';
+
+dotenv.config();
 
 // Default configuration values
 const defaults = {
@@ -57,4 +59,4 @@ if (!fs.existsSync(logsDir)) {
 
 // Freeze the config object to prevent runtime modifications
 const frozenConfig = Object.freeze(config);
-module.exports = frozenConfig;
+export default frozenConfig;

@@ -8,11 +8,11 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 dotenv.config({ path: join(__dirname, '../../.env') });
 
-// Validate required configuration
-if (!process.env.CLIENT_ID) {
-  logger.error('CLIENT_ID environment variable is required');
-  process.exit(1);
-}
+// Validate required configuration (CLIENT_ID is optional when passed to constructor)
+// if (!process.env.CLIENT_ID) {
+//   logger.error('CLIENT_ID environment variable is required');
+//   process.exit(1);
+// }
 
 // Configuration object with defaults
 const config = {

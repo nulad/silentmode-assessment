@@ -1,7 +1,7 @@
-const WebSocket = require('ws');
-const logger = require('./utils/logger');
-const config = require('./config');
-const { MESSAGE_TYPES, validateMessage } = require('../../shared/protocol');
+import { WebSocketServer as WSServer } from 'ws';
+import logger from './utils/logger.js';
+import config from './config.js';
+import { MESSAGE_TYPES, validateMessage } from '../../shared/protocol.js';
 
 class WebSocketServer {
   constructor() {
@@ -11,7 +11,7 @@ class WebSocketServer {
   }
 
   start() {
-    this.wss = new WebSocket.Server({ 
+    this.wss = new WSServer({ 
       port: config.WS_PORT,
       perMessageDeflate: false
     });
@@ -187,7 +187,7 @@ class WebSocketServer {
 
   sendToClient(clientId, message) {
     const client = this.clients.get(clientId);
-    if (client && client.ws.readyState === WebSocket.OPEN) {
+    if (client && client.ws.readyState === 1) { // WebSocket.OPEN = 1
       try {
         client.ws.send(JSON.stringify(message));
       } catch (error) {
@@ -243,4 +243,4 @@ class WebSocketServer {
   }
 }
 
-module.exports = WebSocketServer;
+export default WebSocketServer;

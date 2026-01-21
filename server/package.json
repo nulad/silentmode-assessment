@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "description": "SilentMode file transfer server",
   "main": "src/index.js",
+  "type": "module",
   "bin": {
     "silentmode": "cli.js"
   },

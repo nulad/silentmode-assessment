@@ -134,26 +134,3 @@ export {
   MESSAGE_SCHEMAS,
   validateMessage
 };
-
-// Also provide named exports for convenience
-export { MessageTypes as MESSAGE_TYPES };
-export { ErrorCodes as ERROR_CODES };
-export { Constants as CONSTANTS };
-export { MessageSchemas as MESSAGE_SCHEMAS };
-export { validateMessage };
-
-// For CommonJS compatibility
-module.exports = {
-  MESSAGE_TYPES,
-  ERROR_CODES,
-  CONSTANTS,
-  MESSAGE_SCHEMAS,
-  validateMessage
-};
-
-// Also provide named exports for convenience
-module.exports.MessageTypes = MESSAGE_TYPES;
-module.exports.ErrorCodes = ERROR_CODES;
-module.exports.Constants = CONSTANTS;
-module.exports.MessageSchemas = MESSAGE_SCHEMAS;
-module.exports.validateMessage = validateMessage;

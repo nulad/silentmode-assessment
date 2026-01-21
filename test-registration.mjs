@@ -86,7 +86,7 @@ async function testRegistration() {
 async function checkServer() {
   return new Promise((resolve) => {
     const WebSocket = require('ws');
-    const testWs = new WebSocket(`ws://${config.SERVER_HOST}:${config.WS_PORT}`);
+    const testWs = new WebSocket(`ws://localhost:8080`);
     
     testWs.on('open', () => {
       testWs.close();
@@ -103,7 +103,7 @@ async function main() {
   const serverRunning = await checkServer();
   
   if (!serverRunning) {
-    console.error(`Error: Server is not running on ${config.SERVER_HOST}:${config.WS_PORT}`);
+    console.error(`Error: Server is not running on localhost:8080`);
     console.log('Please start the server first: npm run dev');
     process.exit(1);
   }
