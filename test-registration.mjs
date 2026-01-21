@@ -9,8 +9,12 @@
 process.env.CLIENT_ID = 'test-client';
 process.env.LOG_LEVEL = 'info';
 
-const WebSocketClient = require('./client/src/websocket-client');
-const config = require('./server/src/config');
+import WebSocketClient from './client/src/websocket-client.js';
+
+// Use createRequire for config
+import { createRequire } from 'module';
+const require = createRequire(import.meta.url);
+const config = require('./server/src/config.js');
 
 async function testRegistration() {
   console.log('=== Testing Client Registration Protocol ===\n');
@@ -107,6 +111,4 @@ async function main() {
   await testRegistration();
 }
 
-if (require.main === module) {
-  main().catch(console.error);
-}
+main().catch(console.error);

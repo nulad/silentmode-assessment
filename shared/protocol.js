@@ -127,6 +127,22 @@ function validateMessage(type, data) {
 }
 
 // Export everything
+export {
+  MESSAGE_TYPES,
+  ERROR_CODES,
+  CONSTANTS,
+  MESSAGE_SCHEMAS,
+  validateMessage
+};
+
+// Also provide named exports for convenience
+export { MessageTypes as MESSAGE_TYPES };
+export { ErrorCodes as ERROR_CODES };
+export { Constants as CONSTANTS };
+export { MessageSchemas as MESSAGE_SCHEMAS };
+export { validateMessage };
+
+// For CommonJS compatibility
 module.exports = {
   MESSAGE_TYPES,
   ERROR_CODES,

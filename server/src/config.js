@@ -7,6 +7,7 @@ const fs = require('fs');
 const defaults = {
   PORT: 3000,
   WS_PORT: 8080,
+  SERVER_HOST: 'localhost',
   DOWNLOAD_DIR: './downloads',
   CHUNK_SIZE: 1048576,
   MAX_CHUNK_RETRY_ATTEMPTS: 3,
@@ -30,6 +31,7 @@ const validateNumber = (key, value, defaultValue) => {
 const config = {
   PORT: validateNumber('PORT', process.env.PORT || defaults.PORT, defaults.PORT),
   WS_PORT: validateNumber('WS_PORT', process.env.WS_PORT || defaults.WS_PORT, defaults.WS_PORT),
+  SERVER_HOST: process.env.SERVER_HOST || defaults.SERVER_HOST,
   DOWNLOAD_DIR: process.env.DOWNLOAD_DIR || defaults.DOWNLOAD_DIR,
   CHUNK_SIZE: validateNumber('CHUNK_SIZE', process.env.CHUNK_SIZE || defaults.CHUNK_SIZE, defaults.CHUNK_SIZE),
   MAX_CHUNK_RETRY_ATTEMPTS: validateNumber('MAX_CHUNK_RETRY_ATTEMPTS', process.env.MAX_CHUNK_RETRY_ATTEMPTS || defaults.MAX_CHUNK_RETRY_ATTEMPTS, defaults.MAX_CHUNK_RETRY_ATTEMPTS),
