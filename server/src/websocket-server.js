@@ -1,12 +1,14 @@
 const WebSocket = require('ws');
 const logger = require('./utils/logger');
 const config = require('./config');
-const { MESSAGE_TYPES, validateMessage } = require('../../shared/protocol');
+const { MESSAGE_TYPES, validateMessage, ERROR_CODES } = require('../../shared/protocol');
+const DownloadManager = require('./download-manager');
 
 class WebSocketServer {
   constructor() {
     this.wss = null;
     this.clients = new Map();
+    this.downloadManager = new DownloadManager();
   }
 
   start() {
@@ -84,6 +86,9 @@ class WebSocketServer {
         case MESSAGE_TYPES.DOWNLOAD_REQUEST:
           this.handleDownloadRequest(clientId, message);
           break;
+        case MESSAGE_TYPES.DOWNLOAD_ACK:
+          this.handleDownloadAck(clientId, message);
+          break;
         case MESSAGE_TYPES.RETRY_CHUNK:
           this.handleRetryChunk(clientId, message);
           break;
@@ -120,16 +125,32 @@ class WebSocketServer {
 
   handleDownloadRequest(clientId, message) {
     logger.info(`Download request from ${clientId} for file: ${message.filePath}`);
-    // This will be implemented in the file transfer module
+    
+    // Generate a unique request ID if not provided
+    const requestId = message.requestId || `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    
+    // Create download in manager
+    this.downloadManager.createDownload(clientId, message.filePath, requestId);
+    
+    // Send DOWNLOAD_REQUEST to client
     this.sendToClient(clientId, {
-      type: MESSAGE_TYPES.DOWNLOAD_ACK,
-      success: false,
-      fileId: '',
-      totalChunks: 0,
-      fileSize: 0,
-      checksum: '',
-      message: 'File transfer not yet implemented'
+      type: MESSAGE_TYPES.DOWNLOAD_REQUEST,
+      requestId: requestId,
+      filePath: message.filePath
     });
+  }
+
+  handleDownloadAck(clientId, message) {
+    logger.info(`Received DOWNLOAD_ACK from ${clientId} for request ${message.requestId}`);
+    
+    const client = this.clients.get(clientId);
+    if (!client) {
+      logger.error(`Received DOWNLOAD_ACK from unknown client: ${clientId}`);
+      return;
+    }
+    
+    // Forward to download manager for processing
+    this.downloadManager.handleDownloadAck(message.requestId, message);
   }
 
   handleRetryChunk(clientId, message) {
