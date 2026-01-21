@@ -5,7 +5,8 @@
   "main": "src/index.js",
   "type": "module",
   "scripts": {
-    "start": "node src/index.js"
+    "start": "node src/index.js",
+    "test": "node -r dotenv/config test/websocket-test.js dotenv_config_path=./.env.test"
   },
   "dependencies": {
     "ws": "^8.14.2",
