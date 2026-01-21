@@ -212,6 +212,44 @@ class WebSocketServer {
       connectedAt: client.connectedAt
     }));
   }
+
+  /**
+   * Send DOWNLOAD_REQUEST to a specific client
+   * @param {string} clientId - The registered client ID
+   * @param {string} requestId - The download request ID
+   * @param {string} filePath - The file path to download
+   */
+  sendDownloadRequest(clientId, requestId, filePath) {
+    const message = {
+      type: MESSAGE_TYPES.DOWNLOAD_REQUEST,
+      requestId,
+      filePath,
+      chunkSize: config.CHUNK_SIZE,
+      timestamp: new Date().toISOString()
+    };
+
+    // Find the WebSocket connection for this client
+    let targetClient = null;
+    for (const [connectionId, clientInfo] of this.clients) {
+      if (clientInfo.registeredId === clientId && clientInfo.ws.readyState === WebSocket.OPEN) {
+        targetClient = clientInfo;
+        break;
+      }
+    }
+
+    if (!targetClient) {
+      throw new Error(`Client ${clientId} not connected`);
+    }
+
+    // Send the message
+    try {
+      targetClient.ws.send(JSON.stringify(message));
+      logger.info(`Sent DOWNLOAD_REQUEST to client ${clientId} for request ${requestId}`);
+    } catch (error) {
+      logger.error(`Failed to send DOWNLOAD_REQUEST to client ${clientId}:`, error);
+      throw error;
+    }
+  }
 }
 
 module.exports = WebSocketServer;
