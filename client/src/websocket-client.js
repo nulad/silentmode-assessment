@@ -243,8 +243,10 @@ class WebSocketClient {
       process.exit(1);
     }
 
-    const delay = this.config.RECONNECT_INTERVAL * Math.pow(2, this.reconnectAttempts);
-    logger.info(`Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts + 1})`);
+    // Exponential backoff: delay = min(RECONNECT_INTERVAL * 1.5^attempt, 60000)
+    const delay = Math.min(this.config.RECONNECT_INTERVAL * Math.pow(1.5, this.reconnectAttempts), 60000);
+    
+    logger.info(`Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts + 1}/${this.config.MAX_RECONNECT_ATTEMPTS})`);
 
     setTimeout(() => {
       this.reconnectAttempts++;
