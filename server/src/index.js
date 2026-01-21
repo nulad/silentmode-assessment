@@ -1,11 +1,13 @@
 require('dotenv').config();
 const logger = require('./utils/logger');
 const WebSocketServer = require('./websocket-server');
+const DownloadManager = require('./download-manager');
 const config = require('./config');
 
 class SilentModeServer {
   constructor() {
     this.wsServer = new WebSocketServer();
+    this.downloadManager = new DownloadManager(this.wsServer);
   }
 
   async start() {
@@ -40,6 +42,14 @@ class SilentModeServer {
     
     logger.info('Server shutdown complete');
     process.exit(0);
+  }
+
+  /**
+   * Get the download manager instance
+   * @returns {DownloadManager}
+   */
+  getDownloadManager() {
+    return this.downloadManager;
   }
 }
 

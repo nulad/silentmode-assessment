@@ -1,5 +1,5 @@
-const crypto = require('crypto');
-const fs = require('fs');
+import crypto from 'crypto';
+import fs from 'fs';
 
 /**
  * Calculate SHA-256 checksum of a buffer
@@ -45,7 +45,7 @@ function verifyChecksum(data, expectedChecksum) {
   return actualChecksum === expectedChecksum;
 }
 
-module.exports = {
+export {
   calculateChecksum,
   calculateFileChecksum,
   verifyChecksum

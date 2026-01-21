@@ -8,20 +8,25 @@
   },
   "scripts": {
     "start": "node src/index.js",
-    "cli": "node cli.js"
+    "cli": "node cli.js",
+    "test": "jest",
+    "test:watch": "jest --watch"
   },
   "dependencies": {
-    "express": "^4.18.2",
-    "ws": "^8.14.2",
+    "chalk": "^4.1.2",
+    "cli-progress": "^3.12.0",
+    "cli-table3": "^0.6.3",
     "commander": "^11.1.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "helmet": "^7.1.0",
+    "ora": "^5.4.1",
     "uuid": "^9.0.0",
     "winston": "^3.11.0",
-    "cors": "^2.8.5",
-    "helmet": "^7.1.0",
-    "cli-progress": "^3.12.0",
-    "chalk": "^4.1.2",
-    "ora": "^5.4.1",
-    "cli-table3": "^0.6.3",
-    "dotenv": "^16.3.1"
+    "ws": "^8.14.2"
+  },
+  "devDependencies": {
+    "jest": "^30.2.0"
   }
 }

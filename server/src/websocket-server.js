@@ -1,7 +1,7 @@
 const WebSocket = require('ws');
 const logger = require('./utils/logger');
 const config = require('./config');
-const { MESSAGE_TYPES, validateMessage } = require('../../shared/protocol');
+const { MESSAGE_TYPES, validateMessage, CONSTANTS } = require('../../shared/protocol');
 
 class WebSocketServer {
   constructor() {
@@ -211,6 +211,59 @@ class WebSocketServer {
       ip: client.ip,
       connectedAt: client.connectedAt
     }));
+  }
+
+  /**
+   * Send a download request to a specific client
+   * @param {string} clientId - The registered client ID
+   * @param {string} requestId - The download request ID
+   * @param {string} filePath - Path to the file to download
+   */
+  sendDownloadRequest(clientId, requestId, filePath) {
+    // Find the client connection by registered ID
+    const clientConnection = Array.from(this.clients.values())
+      .find(client => client.registeredId === clientId);
+
+    if (!clientConnection) {
+      throw new Error(`Client ${clientId} is not connected`);
+    }
+
+    if (clientConnection.ws.readyState !== WebSocket.OPEN) {
+      throw new Error(`Client ${clientId} connection is not open`);
+    }
+
+    const message = {
+      type: MESSAGE_TYPES.DOWNLOAD_REQUEST,
+      requestId,
+      filePath,
+      chunkSize: CONSTANTS.CHUNK_SIZE,
+      timestamp: new Date().toISOString()
+    };
+
+    logger.info(`Sending download request ${requestId} to client ${clientId} for file: ${filePath}`);
+    this.sendToClient(clientConnection.id, message);
+  }
+
+  /**
+   * Send a cancel download message to a client
+   * @param {string} clientId - The registered client ID
+   * @param {string} requestId - The download request ID
+   * @param {string} reason - Reason for cancellation
+   */
+  sendCancelDownload(clientId, requestId, reason) {
+    const clientConnection = Array.from(this.clients.values())
+      .find(client => client.registeredId === clientId);
+
+    if (clientConnection && clientConnection.ws.readyState === WebSocket.OPEN) {
+      const message = {
+        type: MESSAGE_TYPES.CANCEL_DOWNLOAD,
+        requestId,
+        reason
+      };
+
+      logger.info(`Sending cancel download ${requestId} to client ${clientId}, reason: ${reason}`);
+      this.sendToClient(clientConnection.id, message);
+    }
   }
 }
 

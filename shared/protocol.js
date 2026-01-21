@@ -56,8 +56,10 @@ const MESSAGE_SCHEMAS = {
     message: 'string'
   },
   [MESSAGE_TYPES.DOWNLOAD_REQUEST]: {
-    clientId: 'string',
-    filePath: 'string'
+    requestId: 'string',
+    filePath: 'string',
+    chunkSize: 'number',
+    timestamp: 'string'
   },
   [MESSAGE_TYPES.DOWNLOAD_ACK]: {
     success: 'boolean',
