@@ -247,11 +247,25 @@ class WebSocketServer {
     }
   }
 
-  handleClose(clientId, code, reason) {
+  async handleClose(clientId, code, reason) {
     const client = this.clients.get(clientId);
     if (client) {
-      logger.info(`Client disconnected: ${client.registeredId || clientId} (${code}: ${reason})`);
+      const displayId = client.registeredId || clientId;
+      logger.info(`Client disconnected: ${displayId} (${code}: ${reason})`);
+
+      // Cancel all active downloads for this client (check both internal and registered IDs)
+      let cancelledCount = await this.downloadManager.cancelClientDownloads(clientId);
+      if (client.registeredId && client.registeredId !== clientId) {
+        cancelledCount += await this.downloadManager.cancelClientDownloads(client.registeredId);
+      }
+
+      if (cancelledCount > 0) {
+        logger.info(`Cancelled ${cancelledCount} download(s) for disconnected client ${displayId}`);
+      }
+
+      // Remove client from registry
       this.clients.delete(clientId);
+      logger.debug(`Removed client ${displayId} from registry`);
     }
   }
 

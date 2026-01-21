@@ -485,6 +485,48 @@ class DownloadManager {
   }
 
   /**
+   * Cancel all downloads for a specific client (used when client disconnects)
+   * @param {string} clientId - Client ID (can be internal or registered ID)
+   * @returns {number} Number of downloads cancelled
+   */
+  async cancelClientDownloads(clientId) {
+    const toCancel = [];
+
+    // Find all downloads associated with this client (as source or requester)
+    for (const [requestId, download] of this.downloads.entries()) {
+      if (download.clientId === clientId || download.requesterClientId === clientId) {
+        toCancel.push(requestId);
+      }
+    }
+
+    if (toCancel.length === 0) {
+      logger.debug(`No active downloads found for client ${clientId}`);
+      return 0;
+    }
+
+    // Cancel each download
+    for (const requestId of toCancel) {
+      await this.cancelDownload(requestId, `Client ${clientId} disconnected`);
+
+      // Clean up temp file
+      const download = this.downloads.get(requestId);
+      if (download && download.tempFilePath) {
+        try {
+          if (fs.existsSync(download.tempFilePath)) {
+            await fs.promises.unlink(download.tempFilePath);
+            logger.debug(`Deleted temp file: ${download.tempFilePath}`);
+          }
+        } catch (error) {
+          logger.error(`Error deleting temp file for ${requestId}:`, error);
+        }
+      }
+    }
+
+    logger.info(`Cancelled ${toCancel.length} download(s) for client ${clientId}`);
+    return toCancel.length;
+  }
+
+  /**
    * Clean up old downloads (optional - for memory management)
    * @param {number} maxAge - Maximum age in milliseconds
    */
