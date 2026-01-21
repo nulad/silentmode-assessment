@@ -91,8 +91,12 @@ const MESSAGE_SCHEMAS = {
     message: 'string',
     details: 'object' // optional
   },
-  [MESSAGE_TYPES.PING]: {},
-  [MESSAGE_TYPES.PONG]: {}
+  [MESSAGE_TYPES.PING]: {
+    timestamp: 'string'
+  },
+  [MESSAGE_TYPES.PONG]: {
+    timestamp: 'string'
+  }
 };
 
 // Helper function to validate messages

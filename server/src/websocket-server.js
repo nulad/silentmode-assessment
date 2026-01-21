@@ -39,7 +39,7 @@ class WebSocketServer {
       ws: ws,
       ip: req.socket.remoteAddress,
       connectedAt: new Date(),
-      isAlive: true
+      lastHeartbeat: new Date()
     };
 
     this.clients.set(clientId, clientInfo);
@@ -55,10 +55,6 @@ class WebSocketServer {
 
     ws.on('error', (error) => {
       logger.error(`Client ${clientId} error:`, error);
-    });
-
-    ws.on('pong', () => {
-      clientInfo.isAlive = true;
     });
 
     this.sendToClient(clientId, {
@@ -96,7 +92,10 @@ class WebSocketServer {
           this.handleCancelDownload(clientId, message);
           break;
         case MESSAGE_TYPES.PING:
-          this.handlePing(clientId);
+          this.handlePing(clientId, message);
+          break;
+        case MESSAGE_TYPES.PONG:
+          this.handlePong(clientId, message);
           break;
         default:
           logger.warn(`Unknown message type: ${message.type} from ${clientId}`);
@@ -180,10 +179,19 @@ class WebSocketServer {
     // This will be implemented in the file transfer module
   }
 
-  handlePing(clientId) {
+  handlePing(clientId, message) {
     this.sendToClient(clientId, {
-      type: MESSAGE_TYPES.PONG
+      type: MESSAGE_TYPES.PONG,
+      timestamp: new Date().toISOString()
     });
+  }
+
+  handlePong(clientId, message) {
+    const client = this.clients.get(clientId);
+    if (client) {
+      client.lastHeartbeat = new Date();
+      logger.debug(`Received PONG from ${clientId}`);
+    }
   }
 
   handleClose(clientId, code, reason) {
@@ -219,17 +227,27 @@ class WebSocketServer {
   }
 
   startHeartbeat() {
+    const STALE_TIMEOUT = config.HEARTBEAT_INTERVAL * 3; // 90 seconds
+
     setInterval(() => {
+      const now = new Date();
+
       this.clients.forEach((client, clientId) => {
-        if (!client.isAlive) {
-          logger.warn(`Client ${clientId} failed heartbeat check, terminating`);
+        // Check if client is stale (no PONG for 90 seconds)
+        const timeSinceLastHeartbeat = now - client.lastHeartbeat;
+
+        if (timeSinceLastHeartbeat > STALE_TIMEOUT) {
+          logger.warn(`Client ${clientId} is stale (no PONG for ${timeSinceLastHeartbeat}ms), terminating`);
           client.ws.terminate();
           this.clients.delete(clientId);
           return;
         }
 
-        client.isAlive = false;
-        client.ws.ping();
+        // Send PING to client
+        this.sendToClient(clientId, {
+          type: MESSAGE_TYPES.PING,
+          timestamp: now.toISOString()
+        });
       });
     }, config.HEARTBEAT_INTERVAL);
   }
