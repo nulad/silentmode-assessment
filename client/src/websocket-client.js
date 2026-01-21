@@ -61,7 +61,7 @@ class WebSocketClient {
   handleMessage(data) {
     try {
       const message = JSON.parse(data.toString());
-      logger.debug(`Received message: ${message.type}`);
+      logger.debug(`Received message: ${message.type}`, JSON.stringify(message, null, 2));
 
       if (!message.type) {
         throw new Error('Message missing type field');
@@ -87,6 +87,9 @@ class WebSocketClient {
           break;
         case MESSAGE_TYPES.PONG:
           // PONG is for server-side heartbeat tracking
+          break;
+        case MESSAGE_TYPES.ERROR:
+          this.handleError(message);
           break;
         default:
           logger.warn(`Unknown message type: ${message.type}`);
@@ -222,6 +225,10 @@ class WebSocketClient {
       type: MESSAGE_TYPES.PONG,
       timestamp: new Date().toISOString()
     });
+  }
+
+  handleError(message) {
+    logger.error(`Received error from server: ${message.code} - ${message.message}`);
   }
 
   send(message) {

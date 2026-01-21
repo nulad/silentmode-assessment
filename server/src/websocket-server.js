@@ -147,11 +147,14 @@ class WebSocketServer {
     }
     
     // Send DOWNLOAD_REQUEST to target client
-    this.sendToClient(targetClientId, {
+    const requestMessage = {
       type: MESSAGE_TYPES.DOWNLOAD_REQUEST,
+      clientId: message.clientId,
       requestId: requestId,
       filePath: message.filePath
-    });
+    };
+    logger.debug(`Sending message to target client:`, JSON.stringify(requestMessage, null, 2));
+    this.sendToClient(targetClientId, requestMessage);
     
     logger.info(`Sent DOWNLOAD_REQUEST ${requestId} to client ${message.clientId}`);
   }

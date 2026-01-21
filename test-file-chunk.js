@@ -12,7 +12,7 @@ if (!fs.existsSync(testFilePath)) {
 }
 
 // Connect to server as admin to trigger download
-const ws = new WebSocket('ws://localhost:8081');
+const ws = new WebSocket('ws://localhost:8082');
 
 let chunkCount = 0;
 let totalChunks = 0;
