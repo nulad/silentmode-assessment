@@ -1,7 +1,7 @@
 import dotenv from 'dotenv';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
-import winston from 'winston';
+import logger from './utils/logger.js';
 
 // Load environment variables
 const __filename = fileURLToPath(import.meta.url);
@@ -10,7 +10,7 @@ dotenv.config({ path: join(__dirname, '../../.env') });
 
 // Validate required configuration
 if (!process.env.CLIENT_ID) {
-  winston.error('CLIENT_ID environment variable is required');
+  logger.error('CLIENT_ID environment variable is required');
   process.exit(1);
 }
 
