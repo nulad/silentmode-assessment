@@ -124,8 +124,8 @@ class WebSocketClient {
       
       logger.info(`Sent DOWNLOAD_ACK for ${message.filePath} (${fileInfo.size} bytes, ${fileInfo.totalChunks} chunks)`);
       
-      // Start sending chunks (this will be implemented in the next task)
-      // await this.sendFileChunks(message.requestId, message.filePath);
+      // Start sending chunks
+      await this.sendFileChunks(message.requestId, message.filePath);
       
     } catch (error) {
       logger.error(`File not found or error reading file: ${error.message}`);
@@ -139,6 +139,69 @@ class WebSocketClient {
           code: 'FILE_NOT_FOUND',
           message: error.message
         },
+        timestamp: new Date().toISOString()
+      });
+    }
+  }
+
+  async sendFileChunks(fileId, filePath) {
+    logger.info(`Starting to send chunks for file ${filePath} (ID: ${fileId})`);
+    
+    try {
+      const fileInfo = await this.fileHandler.getFileInfo(filePath);
+      
+      for (let chunkIndex = 0; chunkIndex < fileInfo.totalChunks; chunkIndex++) {
+        // Read chunk data
+        const chunkData = await this.fileHandler.readChunk(filePath, chunkIndex);
+        
+        // Calculate checksum
+        const checksum = await this.fileHandler.calculateChunkChecksum(filePath, chunkIndex);
+        
+        // Convert to base64
+        const base64Data = chunkData.toString('base64');
+        
+        // Send FILE_CHUNK message
+        this.send({
+          type: MESSAGE_TYPES.FILE_CHUNK,
+          fileId: fileId,
+          chunkIndex: chunkIndex,
+          data: base64Data,
+          checksum: checksum,
+          size: chunkData.length,
+          timestamp: new Date().toISOString()
+        });
+        
+        // Log progress every 10 chunks
+        if ((chunkIndex + 1) % 10 === 0 || chunkIndex === fileInfo.totalChunks - 1) {
+          logger.info(`Sent chunk ${chunkIndex + 1}/${fileInfo.totalChunks} for file ${fileId}`);
+        }
+        
+        // Small delay to prevent overwhelming
+        if (chunkIndex < fileInfo.totalChunks - 1) {
+          await new Promise(resolve => setTimeout(resolve, 10));
+        }
+      }
+      
+      // Send DOWNLOAD_COMPLETE message
+      this.send({
+        type: MESSAGE_TYPES.DOWNLOAD_COMPLETE,
+        fileId: fileId,
+        success: true,
+        message: 'File transfer completed successfully',
+        timestamp: new Date().toISOString()
+      });
+      
+      logger.info(`Completed sending file ${filePath} (ID: ${fileId})`);
+      
+    } catch (error) {
+      logger.error(`Error sending file chunks: ${error.message}`);
+      
+      // Send DOWNLOAD_COMPLETE with error
+      this.send({
+        type: MESSAGE_TYPES.DOWNLOAD_COMPLETE,
+        fileId: fileId,
+        success: false,
+        message: `File transfer failed: ${error.message}`,
         timestamp: new Date().toISOString()
       });
     }
