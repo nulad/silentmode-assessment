@@ -1,3 +1,6 @@
+// Set environment variable for test port BEFORE importing server
+process.env.WS_PORT = '8081';
+
 const WebSocket = require('ws');
 const SilentModeServer = require('../src/index');
 const { MESSAGE_TYPES } = require('../../shared/protocol');
@@ -10,9 +13,6 @@ describe('Download Request Integration', () => {
   let testPort = 8081; // Use a different port
 
   beforeAll(async () => {
-    // Set environment variable for test port
-    process.env.WS_PORT = testPort;
-    
     // Start the server
     serverInstance = new SilentModeServer();
     server = serverInstance.wsServer;
@@ -29,11 +29,13 @@ describe('Download Request Integration', () => {
     if (server) {
       server.stop();
     }
+    // Clean up environment variable
+    delete process.env.WS_PORT;
   });
 
   beforeEach(async () => {
     // Connect a client
-    clientWs = new WebSocket(`ws://localhost:${server.wss.address().port}`);
+    clientWs = new WebSocket(`ws://localhost:${testPort}`);
     
     await new Promise((resolve, reject) => {
       clientWs.on('open', resolve);
