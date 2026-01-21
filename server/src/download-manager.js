@@ -3,7 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const logger = require('./utils/logger');
 const { MESSAGE_TYPES } = require('../../shared/protocol');
-const { verifyChecksum } = require('./utils/checksum');
+const { verifyChecksum, calculateFileChecksum } = require('./utils/checksum');
 
 /**
  * Download Manager tracks active downloads and their states
@@ -178,6 +178,11 @@ class DownloadManager {
         logger.info(`Received chunk ${chunk.chunkIndex + 1}/${chunk.totalChunks} for request ${requestId} (${download.progress}%)`);
       }
 
+      // Check if all chunks have been received
+      if (download.receivedChunkIndices.size === download.totalChunks) {
+        await this.assembleFile(requestId);
+      }
+
       return { success: true, chunkIndex: chunk.chunkIndex };
 
     } catch (error) {
@@ -223,6 +228,94 @@ class DownloadManager {
     } catch (error) {
       logger.error(`Failed to write chunk ${chunkIndex} to file:`, error);
       throw error;
+    }
+  }
+
+  /**
+   * Assemble the file from chunks and verify checksum
+   * @param {string} requestId - Request ID
+   */
+  async assembleFile(requestId) {
+    const download = this.downloads.get(requestId);
+    if (!download) {
+      logger.error(`Cannot assemble file: download ${requestId} not found`);
+      return;
+    }
+
+    try {
+      logger.info(`Assembling file for request ${requestId}`);
+
+      // Close temp file handle if open
+      if (download.tempFileHandle) {
+        await download.tempFileHandle.close();
+        logger.debug(`Closed temp file for assembly of ${requestId}`);
+        download.tempFileHandle = null;
+      }
+
+      // Verify all chunks are present
+      if (download.receivedChunkIndices.size !== download.totalChunks) {
+        throw new Error(`Missing chunks: expected ${download.totalChunks}, received ${download.receivedChunkIndices.size}`);
+      }
+
+      // Calculate checksum of assembled file
+      const actualChecksum = await calculateFileChecksum(download.tempFilePath);
+      logger.info(`Calculated checksum for ${requestId}: ${actualChecksum}`);
+      logger.info(`Expected checksum for ${requestId}: ${download.checksum}`);
+
+      // Compare checksums
+      if (actualChecksum !== download.checksum) {
+        throw new Error(`Checksum mismatch: expected ${download.checksum}, got ${actualChecksum}`);
+      }
+
+      // Generate final filename: downloads/{clientId}-{timestamp}.txt
+      const timestamp = Date.now();
+      const finalFileName = `${download.clientId}-${timestamp}.txt`;
+      const finalFilePath = path.join(__dirname, '../downloads', finalFileName);
+
+      // Ensure downloads directory exists
+      const downloadsDir = path.dirname(finalFilePath);
+      if (!fs.existsSync(downloadsDir)) {
+        fs.mkdirSync(downloadsDir, { recursive: true });
+      }
+
+      // Move temp file to final location
+      await fs.promises.rename(download.tempFilePath, finalFilePath);
+      logger.info(`Moved temp file to final location: ${finalFilePath}`);
+
+      // Update download status with success
+      this.updateDownload(requestId, {
+        status: 'completed',
+        finalFilePath,
+        actualChecksum,
+        completedAt: new Date()
+      });
+
+      logger.info(`File assembly completed successfully for request ${requestId}: ${finalFilePath}`);
+
+      // Clean up temp file reference
+      download.tempFilePath = null;
+
+    } catch (error) {
+      logger.error(`File assembly failed for request ${requestId}: ${error.message}`);
+
+      // Update download status with failure
+      this.updateDownload(requestId, {
+        status: 'failed',
+        error: {
+          code: 'ASSEMBLY_FAILED',
+          message: error.message
+        }
+      });
+
+      // Clean up temp file on failure
+      if (download.tempFilePath && fs.existsSync(download.tempFilePath)) {
+        try {
+          await fs.promises.unlink(download.tempFilePath);
+          logger.info(`Cleaned up temp file after failed assembly: ${download.tempFilePath}`);
+        } catch (cleanupError) {
+          logger.error(`Failed to clean up temp file: ${cleanupError.message}`);
+        }
+      }
     }
   }
 
@@ -298,6 +391,16 @@ class DownloadManager {
       }
     }
 
+    // Clean up temp file on failure
+    if (download && download.tempFilePath && fs.existsSync(download.tempFilePath)) {
+      try {
+        await fs.promises.unlink(download.tempFilePath);
+        logger.info(`Cleaned up temp file after failed download: ${download.tempFilePath}`);
+      } catch (cleanupError) {
+        logger.error(`Failed to clean up temp file: ${cleanupError.message}`);
+      }
+    }
+
     this.updateDownload(requestId, {
       status: 'failed',
       error: {
@@ -325,6 +428,16 @@ class DownloadManager {
         download.tempFileHandle = null;
       } catch (error) {
         logger.error(`Error closing temp file for ${requestId}:`, error);
+      }
+    }
+
+    // Clean up partial files on download cancellation
+    if (download && download.tempFilePath && fs.existsSync(download.tempFilePath)) {
+      try {
+        await fs.promises.unlink(download.tempFilePath);
+        logger.info(`Cleaned up partial file after cancellation: ${download.tempFilePath}`);
+      } catch (error) {
+        logger.error(`Failed to clean up partial file: ${error.message}`);
       }
     }
 
