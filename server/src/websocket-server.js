@@ -2,11 +2,13 @@ const WebSocket = require('ws');
 const logger = require('./utils/logger');
 const config = require('./config');
 const { MESSAGE_TYPES, validateMessage } = require('../../shared/protocol');
+const ClientRegistry = require('./client-registry');
 
 class WebSocketServer {
   constructor() {
     this.wss = null;
-    this.clients = new Map();
+    this.clientRegistry = new ClientRegistry();
+    this.tempConnections = new Map(); // Track unregistered connections
   }
 
   start() {
@@ -31,35 +33,35 @@ class WebSocketServer {
   }
 
   handleConnection(ws, req) {
-    const clientId = this.generateClientId();
+    const tempId = this.generateClientId();
     const clientInfo = {
-      id: clientId,
+      id: tempId,
       ws: ws,
       ip: req.socket.remoteAddress,
       connectedAt: new Date(),
       isAlive: true
     };
 
-    this.clients.set(clientId, clientInfo);
-    logger.info(`Client connected: ${clientId} from ${clientInfo.ip}`);
+    this.tempConnections.set(tempId, clientInfo);
+    logger.info(`Temporary connection: ${tempId} from ${clientInfo.ip}`);
 
     ws.on('message', (data) => {
-      this.handleMessage(clientId, data);
+      this.handleMessage(tempId, data);
     });
 
     ws.on('close', (code, reason) => {
-      this.handleClose(clientId, code, reason);
+      this.handleClose(tempId, code, reason);
     });
 
     ws.on('error', (error) => {
-      logger.error(`Client ${clientId} error:`, error);
+      logger.error(`Client ${tempId} error:`, error);
     });
 
     ws.on('pong', () => {
       clientInfo.isAlive = true;
     });
 
-    this.sendToClient(clientId, {
+    this.sendToClient(tempId, {
       type: MESSAGE_TYPES.REGISTER_ACK,
       success: true,
       message: 'Connected to SilentMode server'
@@ -103,18 +105,34 @@ class WebSocketServer {
     }
   }
 
-  handleRegister(clientId, message) {
+  handleRegister(tempId, message) {
     logger.info(`Registering client: ${message.clientId}`);
     
-    const client = this.clients.get(clientId);
-    if (client) {
-      client.registeredId = message.clientId;
+    const tempClient = this.tempConnections.get(tempId);
+    if (!tempClient) {
+      logger.error(`Temporary connection not found: ${tempId}`);
+      return;
     }
 
-    this.sendToClient(clientId, {
+    // Add client to registry with metadata
+    const success = this.clientRegistry.addClient(message.clientId, tempClient.ws, {
+      version: message.version,
+      hostname: message.hostname,
+      platform: message.platform
+    });
+
+    if (success) {
+      // Remove from temp connections
+      this.tempConnections.delete(tempId);
+      // Update the ws reference to use registered ID
+      tempClient.registeredId = message.clientId;
+      this.tempConnections.set(message.clientId, tempClient);
+    }
+
+    this.sendToClient(success ? message.clientId : tempId, {
       type: MESSAGE_TYPES.REGISTER_ACK,
-      success: true,
-      message: 'Registration successful'
+      success: success,
+      message: success ? 'Registration successful' : 'Client ID already exists'
     });
   }
 
@@ -148,16 +166,37 @@ class WebSocketServer {
     });
   }
 
-  handleClose(clientId, code, reason) {
-    const client = this.clients.get(clientId);
+  handleClose(tempId, code, reason) {
+    const client = this.tempConnections.get(tempId);
     if (client) {
-      logger.info(`Client disconnected: ${client.registeredId || clientId} (${code}: ${reason})`);
-      this.clients.delete(clientId);
+      const clientId = client.registeredId || tempId;
+      logger.info(`Client disconnected: ${clientId} (${code}: ${reason})`);
+      
+      // Remove from registry if registered
+      if (client.registeredId) {
+        this.clientRegistry.removeClient(client.registeredId);
+      }
+      
+      this.tempConnections.delete(tempId);
     }
   }
 
   sendToClient(clientId, message) {
-    const client = this.clients.get(clientId);
+    let client;
+    
+    // Try temp connections first (for unregistered clients)
+    client = this.tempConnections.get(clientId);
+    
+    // If not found, try registered clients in temp connections
+    if (!client) {
+      for (const [tempId, tempClient] of this.tempConnections) {
+        if (tempClient.registeredId === clientId) {
+          client = tempClient;
+          break;
+        }
+      }
+    }
+    
     if (client && client.ws.readyState === WebSocket.OPEN) {
       try {
         client.ws.send(JSON.stringify(message));
@@ -182,17 +221,28 @@ class WebSocketServer {
 
   startHeartbeat() {
     setInterval(() => {
-      this.clients.forEach((client, clientId) => {
+      // Check temp connections
+      for (const [tempId, client] of this.tempConnections) {
         if (!client.isAlive) {
-          logger.warn(`Client ${clientId} failed heartbeat check, terminating`);
+          logger.warn(`Client ${tempId} failed heartbeat check, terminating`);
           client.ws.terminate();
-          this.clients.delete(clientId);
-          return;
+          this.tempConnections.delete(tempId);
+          
+          // Also remove from registry if registered
+          if (client.registeredId) {
+            this.clientRegistry.removeClient(client.registeredId);
+          }
+          continue;
         }
 
         client.isAlive = false;
         client.ws.ping();
-      });
+        
+        // Update heartbeat in registry if registered
+        if (client.registeredId) {
+          this.clientRegistry.updateHeartbeat(client.registeredId);
+        }
+      }
     }, config.HEARTBEAT_INTERVAL);
   }
 
@@ -205,12 +255,15 @@ class WebSocketServer {
   }
 
   getConnectedClients() {
-    return Array.from(this.clients.values()).map(client => ({
-      id: client.id,
-      registeredId: client.registeredId,
-      ip: client.ip,
-      connectedAt: client.connectedAt
-    }));
+    return this.clientRegistry.getAllClients();
+  }
+  
+  /**
+   * Get the client registry instance
+   * @returns {ClientRegistry} The client registry
+   */
+  getClientRegistry() {
+    return this.clientRegistry;
   }
 }
 
