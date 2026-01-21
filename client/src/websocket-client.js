@@ -28,7 +28,11 @@ class WebSocketClient {
     this.ws = new WebSocket(this.config.SERVER_WS_URL);
 
     this.ws.on('open', () => {
-      logger.info('Connected to server');
+      if (this.reconnectAttempts > 0) {
+        logger.info('Successfully reconnected to server');
+      } else {
+        logger.info('Connected to server');
+      }
       this.connected = true;
       this.reconnectAttempts = 0;
       this.register();
