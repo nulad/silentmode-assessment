@@ -2,11 +2,13 @@ const WebSocket = require('ws');
 const logger = require('./utils/logger');
 const config = require('./config');
 const { MESSAGE_TYPES, validateMessage } = require('../../shared/protocol');
+const DownloadManager = require('./download-manager');
 
 class WebSocketServer {
   constructor() {
     this.wss = null;
     this.clients = new Map();
+    this.downloadManager = new DownloadManager();
   }
 
   start() {
@@ -120,16 +122,24 @@ class WebSocketServer {
 
   handleDownloadRequest(clientId, message) {
     logger.info(`Download request from ${clientId} for file: ${message.filePath}`);
-    // This will be implemented in the file transfer module
-    this.sendToClient(clientId, {
+    
+    // Create a download request in the manager
+    const requestId = this.downloadManager.createDownload(clientId, message.filePath);
+    logger.info(`Created download request with ID: ${requestId}`);
+    
+    // For now, acknowledge but note that file transfer is not yet implemented
+    // This will be enhanced in the file handler implementation
+    const ackMessage = {
       type: MESSAGE_TYPES.DOWNLOAD_ACK,
       success: false,
-      fileId: '',
+      fileId: requestId,
       totalChunks: 0,
       fileSize: 0,
       checksum: '',
-      message: 'File transfer not yet implemented'
-    });
+      message: 'File transfer not yet implemented - download request tracked'
+    };
+    logger.debug(`Sending DOWNLOAD_ACK:`, ackMessage);
+    this.sendToClient(clientId, ackMessage);
   }
 
   handleRetryChunk(clientId, message) {
@@ -202,6 +212,10 @@ class WebSocketServer {
         logger.info('WebSocket server stopped');
       });
     }
+  }
+
+  getDownloadManager() {
+    return this.downloadManager;
   }
 
   getConnectedClients() {

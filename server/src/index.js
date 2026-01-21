@@ -8,6 +8,10 @@ class SilentModeServer {
     this.wsServer = new WebSocketServer();
   }
 
+  getDownloadManager() {
+    return this.wsServer.getDownloadManager();
+  }
+
   async start() {
     try {
       logger.info('Starting SilentMode server...');
