@@ -6,7 +6,8 @@ const { MESSAGE_TYPES, validateMessage } = require('../../shared/protocol');
 class WebSocketServer {
   constructor() {
     this.wss = null;
-    this.clients = new Map();
+    this.clients = new Map(); // Map of connectionId -> clientInfo
+    this.clientRegistry = new Map(); // Map of registeredClientId -> connectionId
   }
 
   start() {
@@ -58,12 +59,6 @@ class WebSocketServer {
     ws.on('pong', () => {
       clientInfo.isAlive = true;
     });
-
-    this.sendToClient(clientId, {
-      type: MESSAGE_TYPES.REGISTER_ACK,
-      success: true,
-      message: 'Connected to SilentMode server'
-    });
   }
 
   handleMessage(clientId, data) {
@@ -103,19 +98,46 @@ class WebSocketServer {
     }
   }
 
-  handleRegister(clientId, message) {
-    logger.info(`Registering client: ${message.clientId}`);
+  handleRegister(connectionId, message) {
+    logger.info(`Registration request from ${connectionId} for clientId: ${message.clientId}`);
     
-    const client = this.clients.get(clientId);
-    if (client) {
-      client.registeredId = message.clientId;
+    // Check if clientId already exists in registry
+    if (this.clientRegistry.has(message.clientId)) {
+      const existingConnectionId = this.clientRegistry.get(message.clientId);
+      logger.warn(`ClientId ${message.clientId} already registered with connection ${existingConnectionId}`);
+      
+      // Send rejection response
+      this.sendToClient(connectionId, {
+        type: MESSAGE_TYPES.REGISTER_ACK,
+        success: false,
+        message: `ClientId ${message.clientId} is already registered`,
+        timestamp: new Date().toISOString()
+      });
+      return;
     }
-
-    this.sendToClient(clientId, {
-      type: MESSAGE_TYPES.REGISTER_ACK,
-      success: true,
-      message: 'Registration successful'
-    });
+    
+    const client = this.clients.get(connectionId);
+    if (client) {
+      // Add to registry
+      client.registeredId = message.clientId;
+      this.clientRegistry.set(message.clientId, connectionId);
+      
+      logger.info(`Client registered successfully: ${message.clientId}`);
+      this.sendToClient(connectionId, {
+        type: MESSAGE_TYPES.REGISTER_ACK,
+        success: true,
+        message: 'Registration successful',
+        timestamp: new Date().toISOString()
+      });
+    } else {
+      logger.error(`Connection ${connectionId} not found in clients map`);
+      this.sendToClient(connectionId, {
+        type: MESSAGE_TYPES.REGISTER_ACK,
+        success: false,
+        message: 'Internal server error: connection not found',
+        timestamp: new Date().toISOString()
+      });
+    }
   }
 
   handleDownloadRequest(clientId, message) {
@@ -148,11 +170,18 @@ class WebSocketServer {
     });
   }
 
-  handleClose(clientId, code, reason) {
-    const client = this.clients.get(clientId);
+  handleClose(connectionId, code, reason) {
+    const client = this.clients.get(connectionId);
     if (client) {
-      logger.info(`Client disconnected: ${client.registeredId || clientId} (${code}: ${reason})`);
-      this.clients.delete(clientId);
+      logger.info(`Client disconnected: ${client.registeredId || connectionId} (${code}: ${reason})`);
+      
+      // Remove from registry if registered
+      if (client.registeredId && this.clientRegistry.has(client.registeredId)) {
+        this.clientRegistry.delete(client.registeredId);
+        logger.info(`Removed ${client.registeredId} from client registry`);
+      }
+      
+      this.clients.delete(connectionId);
     }
   }
 
