@@ -12,18 +12,20 @@ class DownloadManager {
 
   /**
    * Create a new download request
-   * @param {string} clientId - Client ID
+   * @param {string} clientId - Client ID (source client with the file)
    * @param {string} filePath - File path to download
    * @param {string} requestId - Optional request ID (will generate if not provided)
+   * @param {string} requesterClientId - Client ID who initiated the request
    * @returns {string} Request ID
    */
-  createDownload(clientId, filePath, requestId = null) {
+  createDownload(clientId, filePath, requestId = null, requesterClientId = null) {
     const id = requestId || uuidv4();
     
     this.downloads.set(id, {
       id: id,
       clientId,
       filePath,
+      requesterClientId,
       status: 'pending',
       createdAt: new Date(),
       updatedAt: new Date(),
@@ -98,11 +100,60 @@ class DownloadManager {
       });
     } else {
       // Client cannot fulfill the request
-      logger.error(`DOWNLOAD_ACK failed for ${requestId}: ${ack.error?.message || 'Unknown error'}`);
+      logger.error(`DOWNLOAD_ACK failed for ${requestId}: File not available`);
       
       this.updateDownload(requestId, {
         status: 'failed',
-        error: ack.error
+        error: { message: 'File not available' }
+      });
+    }
+  }
+
+  /**
+   * Handle FILE_CHUNK from client
+   * @param {string} requestId - Request ID
+   * @param {Object} chunk - Chunk message from client
+   */
+  handleFileChunk(requestId, chunk) {
+    const download = this.downloads.get(requestId);
+    if (!download) {
+      logger.warn(`Received FILE_CHUNK for unknown request: ${requestId}`);
+      return;
+    }
+
+    // Update chunks received count
+    this.updateDownload(requestId, {
+      chunksReceived: download.chunksReceived + 1
+    });
+
+    // Log progress every 10 chunks or on last chunk
+    if ((chunk.chunkIndex + 1) % 10 === 0 || chunk.chunkIndex === chunk.totalChunks - 1) {
+      logger.info(`Received chunk ${chunk.chunkIndex + 1}/${chunk.totalChunks} for request ${requestId} (${download.progress}%)`);
+    }
+  }
+
+  /**
+   * Handle DOWNLOAD_COMPLETE from client
+   * @param {string} requestId - Request ID
+   * @param {Object} completion - Completion message from client
+   */
+  handleDownloadComplete(requestId, completion) {
+    const download = this.downloads.get(requestId);
+    if (!download) {
+      logger.warn(`Received DOWNLOAD_COMPLETE for unknown request: ${requestId}`);
+      return;
+    }
+
+    if (completion.success) {
+      logger.info(`Download ${requestId} completed successfully: ${completion.message}`);
+      this.updateDownload(requestId, {
+        status: 'completed'
+      });
+    } else {
+      logger.error(`Download ${requestId} failed: ${completion.message}`);
+      this.updateDownload(requestId, {
+        status: 'failed',
+        error: { message: completion.message }
       });
     }
   }

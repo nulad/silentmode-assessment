@@ -121,8 +121,7 @@ class WebSocketClient {
         success: true,
         fileSize: fileInfo.size,
         totalChunks: fileInfo.totalChunks,
-        fileChecksum: fileInfo.checksum,
-        timestamp: new Date().toISOString()
+        fileChecksum: fileInfo.checksum
       });
       
       logger.info(`Sent DOWNLOAD_ACK for ${message.filePath} (${fileInfo.size} bytes, ${fileInfo.totalChunks} chunks)`);
@@ -138,11 +137,9 @@ class WebSocketClient {
         type: MESSAGE_TYPES.DOWNLOAD_ACK,
         requestId: message.requestId,
         success: false,
-        error: {
-          code: 'FILE_NOT_FOUND',
-          message: error.message
-        },
-        timestamp: new Date().toISOString()
+        fileSize: 0,
+        totalChunks: 0,
+        fileChecksum: ''
       });
     }
   }
@@ -166,8 +163,9 @@ class WebSocketClient {
         // Send FILE_CHUNK message
         this.send({
           type: MESSAGE_TYPES.FILE_CHUNK,
-          fileId: fileId,
+          requestId: fileId,
           chunkIndex: chunkIndex,
+          totalChunks: fileInfo.totalChunks,
           data: base64Data,
           checksum: checksum,
           size: chunkData.length,
@@ -188,7 +186,7 @@ class WebSocketClient {
       // Send DOWNLOAD_COMPLETE message
       this.send({
         type: MESSAGE_TYPES.DOWNLOAD_COMPLETE,
-        fileId: fileId,
+        requestId: fileId,
         success: true,
         message: 'File transfer completed successfully',
         timestamp: new Date().toISOString()
@@ -202,7 +200,7 @@ class WebSocketClient {
       // Send DOWNLOAD_COMPLETE with error
       this.send({
         type: MESSAGE_TYPES.DOWNLOAD_COMPLETE,
-        fileId: fileId,
+        requestId: fileId,
         success: false,
         message: `File transfer failed: ${error.message}`,
         timestamp: new Date().toISOString()
@@ -211,12 +209,12 @@ class WebSocketClient {
   }
 
   handleRetryChunk(message) {
-    logger.info(`Retry request for chunk ${message.chunkIndex} of file ${message.fileId}`);
+    logger.info(`Retry request for chunk ${message.chunkIndex} of file ${message.requestId}`);
     // Will be implemented in retry logic task
   }
 
   handleCancelDownload(message) {
-    logger.info(`Download cancelled for file ${message.fileId}: ${message.reason}`);
+    logger.info(`Download cancelled for file ${message.requestId}: ${message.reason}`);
     // Will be implemented in file transfer task
   }
 

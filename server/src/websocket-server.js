@@ -85,6 +85,12 @@ class WebSocketServer {
         case MESSAGE_TYPES.DOWNLOAD_ACK:
           this.handleDownloadAck(clientId, message);
           break;
+        case MESSAGE_TYPES.FILE_CHUNK:
+          this.handleFileChunk(clientId, message);
+          break;
+        case MESSAGE_TYPES.DOWNLOAD_COMPLETE:
+          this.handleDownloadComplete(clientId, message);
+          break;
         case MESSAGE_TYPES.RETRY_CHUNK:
           this.handleRetryChunk(clientId, message);
           break;
@@ -128,8 +134,8 @@ class WebSocketServer {
     // Generate a unique request ID if not provided
     const requestId = message.requestId || `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     
-    // Create download in manager
-    this.downloadManager.createDownload(message.clientId, message.filePath, requestId);
+    // Create download in manager, tracking the requester
+    this.downloadManager.createDownload(message.clientId, message.filePath, requestId, clientId);
     
     // Find the target client
     let targetClientId = null;
@@ -170,6 +176,50 @@ class WebSocketServer {
     
     // Forward to download manager for processing
     this.downloadManager.handleDownloadAck(message.requestId, message);
+    
+    // Forward ACK to the requester
+    const download = this.downloadManager.getDownload(message.requestId);
+    if (download && download.requesterClientId) {
+      this.sendToClient(download.requesterClientId, message);
+    }
+  }
+
+  handleFileChunk(clientId, message) {
+    logger.debug(`Received FILE_CHUNK from ${clientId} for request ${message.requestId}, chunk ${message.chunkIndex + 1}/${message.totalChunks}`);
+    
+    const client = this.clients.get(clientId);
+    if (!client) {
+      logger.error(`Received FILE_CHUNK from unknown client: ${clientId}`);
+      return;
+    }
+    
+    // Forward to download manager for processing
+    this.downloadManager.handleFileChunk(message.requestId, message);
+    
+    // Forward chunk to the requester
+    const download = this.downloadManager.getDownload(message.requestId);
+    if (download && download.requesterClientId) {
+      this.sendToClient(download.requesterClientId, message);
+    }
+  }
+
+  handleDownloadComplete(clientId, message) {
+    logger.info(`Received DOWNLOAD_COMPLETE from ${clientId} for request ${message.requestId}, success: ${message.success}`);
+    
+    const client = this.clients.get(clientId);
+    if (!client) {
+      logger.error(`Received DOWNLOAD_COMPLETE from unknown client: ${clientId}`);
+      return;
+    }
+    
+    // Forward to download manager for processing
+    this.downloadManager.handleDownloadComplete(message.requestId, message);
+    
+    // Forward completion to the requester
+    const download = this.downloadManager.getDownload(message.requestId);
+    if (download && download.requesterClientId) {
+      this.sendToClient(download.requesterClientId, message);
+    }
   }
 
   handleRetryChunk(clientId, message) {
@@ -276,13 +326,14 @@ class WebSocketServer {
    * Trigger a download to a specific client (for testing/CLI)
    * @param {string} clientId - Target client ID
    * @param {string} filePath - File path to download
+   * @param {string} requesterClientId - Optional requester client ID
    * @returns {string} Request ID
    */
-  triggerDownload(clientId, filePath) {
+  triggerDownload(clientId, filePath, requesterClientId = null) {
     const requestId = `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     
     // Create download in manager
-    this.downloadManager.createDownload(clientId, filePath, requestId);
+    this.downloadManager.createDownload(clientId, filePath, requestId, requesterClientId);
     
     // Find the target client
     let targetClientId = null;

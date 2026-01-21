@@ -12,7 +12,7 @@ if (!fs.existsSync(testFilePath)) {
 }
 
 // Connect to server as admin to trigger download
-const ws = new WebSocket('ws://localhost:8082');
+const ws = new WebSocket('ws://localhost:8080');
 
 let chunkCount = 0;
 let totalChunks = 0;
@@ -36,10 +36,10 @@ ws.on('message', (data) => {
   if (message.type === 'REGISTER_ACK' && message.success) {
     console.log('Registration successful, sending download request...');
     
-    // Send download request to test-client-001
+    // Send download request to test-client-12345
     ws.send(JSON.stringify({
       type: 'DOWNLOAD_REQUEST',
-      clientId: 'test-client-001',
+      clientId: 'test-client-12345',
       filePath: '~/test-chunk-file.txt',
       requestId: 'test-chunk-req-001'
     }));

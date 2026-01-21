@@ -60,30 +60,30 @@ const MESSAGE_SCHEMAS = {
     filePath: 'string'
   },
   [MESSAGE_TYPES.DOWNLOAD_ACK]: {
+    requestId: 'string',
     success: 'boolean',
-    fileId: 'string',
-    totalChunks: 'number',
     fileSize: 'number',
-    checksum: 'string',
-    message: 'string'
+    totalChunks: 'number',
+    fileChecksum: 'string'
   },
   [MESSAGE_TYPES.FILE_CHUNK]: {
-    fileId: 'string',
+    requestId: 'string',
     chunkIndex: 'number',
+    totalChunks: 'number',
     data: 'buffer', // Base64 encoded binary data
     checksum: 'string'
   },
   [MESSAGE_TYPES.RETRY_CHUNK]: {
-    fileId: 'string',
+    requestId: 'string',
     chunkIndex: 'number'
   },
   [MESSAGE_TYPES.DOWNLOAD_COMPLETE]: {
-    fileId: 'string',
+    requestId: 'string',
     success: 'boolean',
     message: 'string'
   },
   [MESSAGE_TYPES.CANCEL_DOWNLOAD]: {
-    fileId: 'string',
+    requestId: 'string',
     reason: 'string'
   },
   [MESSAGE_TYPES.ERROR]: {
