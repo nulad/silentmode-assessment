@@ -22,7 +22,7 @@ class ChunkManager extends EventEmitter {
    * @param {number} totalChunks - Total number of chunks expected
    */
   initChunkTracking(requestId, totalChunks) {
-    if (!requestId || typeof totalChunks !== 'number' || totalChunks <= 0) {
+    if (!requestId || typeof requestId !== 'string' || typeof totalChunks !== 'number' || totalChunks <= 0) {
       throw new Error('Invalid requestId or totalChunks');
     }
 
@@ -48,9 +48,10 @@ class ChunkManager extends EventEmitter {
    * Mark a chunk as successfully received
    * @param {string} requestId - Unique identifier for the download request
    * @param {number} chunkIndex - Index of the received chunk
+   * @param {Object} downloadManager - Download manager instance to update retry tracking
    * @returns {boolean} - True if this is the first time receiving this chunk
    */
-  markChunkReceived(requestId, chunkIndex) {
+  markChunkReceived(requestId, chunkIndex, downloadManager = null) {
     const request = this.requests.get(requestId);
     if (!request) {
       throw new Error(`Request ${requestId} not found`);
@@ -62,6 +63,12 @@ class ChunkManager extends EventEmitter {
 
     const isFirstTime = !request.receivedChunks.has(chunkIndex);
     request.receivedChunks.add(chunkIndex);
+    
+    // Check if this chunk had retry attempts and mark as succeeded
+    if (request.retryAttempts.has(chunkIndex) && downloadManager) {
+      const retryInfo = request.retryAttempts.get(chunkIndex);
+      downloadManager.updateRetryTracking(requestId, chunkIndex, retryInfo.attempts, 'succeeded', retryInfo.reason);
+    }
     
     // Clear any retry attempts for this chunk since it was received successfully
     if (request.retryAttempts.has(chunkIndex)) {
@@ -261,6 +268,12 @@ class ChunkManager extends EventEmitter {
       return;
     }
 
+    // Check if chunk index is valid
+    if (typeof chunkIndex !== 'number' || chunkIndex < 0 || chunkIndex >= request.totalChunks) {
+      console.log(`[ChunkManager] Invalid chunk index ${chunkIndex} in timeout for request ${requestId}`);
+      return;
+    }
+
     // Check if chunk was already received (race condition protection)
     if (request.receivedChunks.has(chunkIndex)) {
       console.log(`[ChunkManager] Chunk ${chunkIndex} timeout fired but chunk already received for request ${requestId}`);
@@ -355,7 +368,7 @@ module.exports = {
   
   // Export individual methods for convenience
   initChunkTracking: (requestId, totalChunks) => chunkManager.initChunkTracking(requestId, totalChunks),
-  markChunkReceived: (requestId, chunkIndex) => chunkManager.markChunkReceived(requestId, chunkIndex),
+  markChunkReceived: (requestId, chunkIndex, downloadManager) => chunkManager.markChunkReceived(requestId, chunkIndex, downloadManager),
   markChunkFailed: (requestId, chunkIndex, reason) => chunkManager.markChunkFailed(requestId, chunkIndex, reason),
   getRetryInfo: (requestId) => chunkManager.getRetryInfo(requestId),
   getMissingChunks: (requestId) => chunkManager.getMissingChunks(requestId),
