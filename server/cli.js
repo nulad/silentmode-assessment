@@ -117,6 +117,67 @@ program
     }
   });
 
+// Clients command group
+const clientsCmd = program
+  .command('clients')
+  .description('Manage clients');
+
+// Clients get command
+clientsCmd
+  .command('get')
+  .description('Get specific client details')
+  .argument('<clientId>', 'Client ID to retrieve')
+  .option('-f, --format <fmt>', 'Output format (table|json)', 'table')
+  .action(async (clientId, options) => {
+    const spinner = ora('Fetching client details...').start();
+    
+    try {
+      const response = await axios.get(`${API_BASE}/clients/${clientId}`);
+      
+      if (!response.data.success) {
+        spinner.fail('Failed to fetch client');
+        console.error(chalk.red('Error:', response.data.error));
+        process.exit(1);
+      }
+      
+      spinner.succeed('Client retrieved');
+      
+      const client = response.data.client;
+      
+      if (options.format === 'json') {
+        console.log(JSON.stringify(client, null, 2));
+      } else {
+        // Table format
+        console.log(chalk.bold('\nClient Details:'));
+        console.log(`  Client ID:      ${chalk.cyan(client.clientId)}`);
+        console.log(`  Connection ID:  ${chalk.gray(client.connectionId)}`);
+        console.log(`  Status:         ${chalk.green(client.status)}`);
+        console.log(`  Connected At:   ${client.connectedAt}`);
+        console.log(`  Last Heartbeat: ${client.lastHeartbeat}`);
+        
+        if (Object.keys(client.metadata).length > 0) {
+          console.log(chalk.bold('\nMetadata:'));
+          Object.entries(client.metadata).forEach(([key, value]) => {
+            console.log(`  ${key}: ${value}`);
+          });
+        }
+      }
+      
+    } catch (error) {
+      if (error.response && error.response.status === 404) {
+        spinner.fail('Client not found');
+        console.error(chalk.red(`Client '${clientId}' is not connected or does not exist`));
+      } else if (error.response) {
+        spinner.fail('Failed to fetch client');
+        console.error(chalk.red(`Error: ${error.response.data.error || error.response.statusText}`));
+      } else {
+        spinner.fail('Connection error');
+        console.error(chalk.red(`Error: ${error.message}`));
+      }
+      process.exit(1);
+    }
+  });
+
 // Subcommands added in other tasks
 
 program.parse();

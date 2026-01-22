@@ -292,6 +292,38 @@ class ExpressServer {
       });
     });
 
+    this.app.get('/api/v1/clients/:clientId', (req, res) => {
+      const { clientId } = req.params;
+      
+      // Find the client
+      let clientInfo = null;
+      for (const [id, client] of this.wsServer.clients.entries()) {
+        if (client.registeredId === clientId || id === clientId) {
+          clientInfo = {
+            clientId: client.registeredId || id,
+            connectionId: id,
+            connectedAt: client.connectedAt.toISOString(),
+            lastHeartbeat: client.lastHeartbeat.toISOString(),
+            status: 'connected',
+            metadata: client.metadata || {}
+          };
+          break;
+        }
+      }
+      
+      if (!clientInfo) {
+        return res.status(404).json({
+          success: false,
+          error: 'Client not found'
+        });
+      }
+      
+      res.json({
+        success: true,
+        client: clientInfo
+      });
+    });
+
     this.app.use((req, res) => {
       res.status(404).json({ error: 'Not found' });
     });
