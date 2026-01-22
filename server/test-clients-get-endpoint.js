@@ -1,71 +1,70 @@
-#!/usr/bin/env node
 const axios = require('axios');
 
-const SERVER_URL = process.env.SERVER_URL || 'http://localhost:3001';
+const SERVER_URL = 'http://localhost:3001';
 
 async function testClientsGetEndpoint() {
   console.log('Testing GET /api/v1/clients/:clientId endpoint...\n');
   
   try {
-    // First, get list of all clients to find a valid client ID
-    console.log('1. Getting list of all clients...');
+    // First, get all clients to find a valid client ID
     const listResponse = await axios.get(`${SERVER_URL}/api/v1/clients`);
     
-    if (!listResponse.data.success || listResponse.data.clients.length === 0) {
-      console.log('No clients connected. Skipping specific client test.\n');
+    if (!listResponse.data.success) {
+      throw new Error('Failed to get clients list');
+    }
+    
+    if (listResponse.data.clients.length === 0) {
+      console.log('No clients connected. Skipping tests.');
       return;
     }
     
     const testClient = listResponse.data.clients[0];
-    console.log(`Found client: ${testClient.clientId}\n`);
+    const clientId = testClient.clientId;
     
-    // Test getting specific client
-    console.log(`2. Getting specific client: ${testClient.clientId}`);
-    const getResponse = await axios.get(`${SERVER_URL}/api/v1/clients/${testClient.clientId}`);
+    // Test 1: Get existing client
+    console.log('1. Testing get existing client...');
+    const response = await axios.get(`${SERVER_URL}/api/v1/clients/${clientId}`);
     
-    if (!getResponse.data.success) {
-      console.error('Failed to get client details');
-      console.error(getResponse.data);
-      process.exit(1);
+    if (!response.data.success) {
+      throw new Error('Expected success response');
     }
     
-    const client = getResponse.data.client;
-    console.log('✓ Client details retrieved successfully:\n');
-    console.log(`  Client ID:      ${client.clientId}`);
-    console.log(`  Connection ID:  ${client.connectionId}`);
-    console.log(`  Status:         ${client.status}`);
-    console.log(`  Connected At:   ${client.connectedAt}`);
-    console.log(`  Last Heartbeat: ${client.lastHeartbeat}`);
-    
-    if (Object.keys(client.metadata).length > 0) {
-      console.log('  Metadata:');
-      Object.entries(client.metadata).forEach(([key, value]) => {
-        console.log(`    ${key}: ${value}`);
-      });
+    if (!response.data.client) {
+      throw new Error('Expected client object in response');
     }
     
-    // Test with non-existent client
-    console.log('\n3. Testing with non-existent client ID...');
+    if (response.data.client.clientId !== clientId) {
+      throw new Error('Client ID mismatch');
+    }
+    
+    console.log('✓ Successfully retrieved client details');
+    console.log(`  Client ID: ${response.data.client.clientId}`);
+    console.log(`  Status: ${response.data.client.status}`);
+    console.log(`  Connected At: ${response.data.client.connectedAt}\n`);
+    
+    // Test 2: Get non-existent client
+    console.log('2. Testing get non-existent client...');
     try {
-      await axios.get(`${SERVER_URL}/api/v1/clients/non-existent-client`);
-      console.error('✗ Should have returned 404 for non-existent client');
-      process.exit(1);
+      await axios.get(`${SERVER_URL}/api/v1/clients/non-existent-client-12345`);
+      throw new Error('Expected 404 error');
     } catch (error) {
       if (error.response && error.response.status === 404) {
         console.log('✓ Correctly returned 404 for non-existent client');
-        console.log(`  Error: ${error.response.data.error}`);
+        if (error.response.data.success === false && error.response.data.error) {
+          console.log(`  Error message: ${error.response.data.error}\n`);
+        }
       } else {
-        console.error('✗ Unexpected error:', error.message);
-        process.exit(1);
+        throw error;
       }
     }
     
-    console.log('\n✅ All tests passed!');
+    console.log('✅ All endpoint tests passed!');
     
   } catch (error) {
-    console.error('Test failed:', error.message);
-    if (error.response) {
-      console.error('Response:', error.response.data);
+    if (error.code === 'ECONNREFUSED') {
+      console.error('Server is not running. Please start the server first.');
+    } else {
+      console.error('Test failed:', error.message);
     }
     process.exit(1);
   }

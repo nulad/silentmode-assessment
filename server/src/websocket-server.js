@@ -3,6 +3,8 @@ const logger = require('./utils/logger');
 const config = require('./config');
 const { MESSAGE_TYPES, validateMessage, ERROR_CODES, RETRY_REASONS } = require('../../shared/protocol');
 const DownloadManager = require('./download-manager');
+const { validate: uuidValidate } = require('uuid');
+const { chunkManager } = require('./chunk-manager');
 
 class WebSocketServer {
   constructor() {
@@ -15,6 +17,11 @@ class WebSocketServer {
     this.wss = new WebSocket.Server({ 
       port: config.WS_PORT,
       perMessageDeflate: false
+    });
+
+    // Set up chunk timeout event listener
+    chunkManager.on('chunkTimeout', (data) => {
+      this.handleChunkTimeout(data);
     });
 
     this.wss.on('listening', () => {
@@ -113,6 +120,20 @@ class WebSocketServer {
     }
   }
 
+  findClientByRegisteredId(registeredId) {
+    logger.debug(`Looking for client with registered ID: ${registeredId}`);
+    logger.debug(`Connected clients: ${Array.from(this.clients.entries()).map(([id, client]) => `${id} -> ${client.registeredId}`).join(', ')}`);
+    
+    for (const [clientId, client] of this.clients.entries()) {
+      if (client.registeredId === registeredId) {
+        logger.debug(`Found client: ${clientId}`);
+        return client;
+      }
+    }
+    logger.debug(`Client not found`);
+    return null;
+  }
+
   handleRegister(clientId, message) {
     logger.info(`Registering client: ${message.clientId}`);
     
@@ -129,6 +150,27 @@ class WebSocketServer {
   }
 
   handleDownloadRequest(clientId, message) {
+    // Validate clientId
+    if (!message.clientId || typeof message.clientId !== 'string' || 
+        !/^[a-zA-Z0-9-]+$/.test(message.clientId) || 
+        message.clientId.length < 1 || message.clientId.length > 64) {
+      this.sendError(clientId, 'INVALID_REQUEST', 'ClientId must be alphanumeric with hyphens, 1-64 characters');
+      return;
+    }
+
+    // Validate filePath
+    if (!message.filePath || typeof message.filePath !== 'string' || 
+        !message.filePath.startsWith('/') || message.filePath.includes('..')) {
+      this.sendError(clientId, 'INVALID_REQUEST', 'FilePath must be an absolute path without directory traversal');
+      return;
+    }
+
+    // Validate requestId if provided
+    if (message.requestId && !uuidValidate(message.requestId)) {
+      this.sendError(clientId, 'INVALID_REQUEST', 'RequestId must be a valid UUID v4');
+      return;
+    }
+
     logger.info(`Download request initiated for client: ${message.clientId}, file: ${message.filePath}`);
     
     // Generate a unique request ID if not provided
@@ -291,6 +333,35 @@ class WebSocketServer {
     }
   }
 
+  handleChunkTimeout(data) {
+    const { requestId, chunkIndex } = data;
+    logger.info(`Chunk timeout detected for request ${requestId}, chunk ${chunkIndex}`);
+    
+    // Find which client has this download
+    const download = this.downloadManager.getDownload(requestId);
+    if (!download) {
+      logger.error(`Download ${requestId} not found for timeout handling`);
+      return;
+    }
+    
+    // Find the client ID for the download
+    let clientId = null;
+    for (const [cid, client] of this.clients.entries()) {
+      if (client.registeredId === download.clientId) {
+        clientId = cid;
+        break;
+      }
+    }
+    
+    if (!clientId) {
+      logger.error(`Client not found for download ${requestId}`);
+      return;
+    }
+    
+    // Send retry chunk with timeout reason
+    this.sendRetryChunk(clientId, requestId, chunkIndex, RETRY_REASONS.TIMEOUT);
+  }
+
   sendError(clientId, code, message, details = {}) {
     this.sendToClient(clientId, {
       type: MESSAGE_TYPES.ERROR,
@@ -301,7 +372,7 @@ class WebSocketServer {
   }
 
   /**
-   * Send RETRY_CHUNK message to client
+   * Send RETRY_CHUNK message to client with exponential backoff
    * @param {string} clientId - Target client ID
    * @param {string} requestId - Request ID
    * @param {number} chunkIndex - Chunk index to retry
@@ -315,7 +386,17 @@ class WebSocketServer {
     }
 
     const failedChunk = download.failedChunks.get(chunkIndex);
-    const attempt = failedChunk ? failedChunk.attempts : 1;
+    const attempt = failedChunk ? failedChunk.attempts + 1 : 1;
+
+    // Check if max retry attempts exceeded
+    if (attempt > config.MAX_CHUNK_RETRY_ATTEMPTS) {
+      logger.error(`Max retry attempts (${config.MAX_CHUNK_RETRY_ATTEMPTS}) exceeded for request ${requestId}, chunk ${chunkIndex}`);
+      this.downloadManager.failDownload(requestId, new Error(`Max retry attempts exceeded for chunk ${chunkIndex}`));
+      return;
+    }
+
+    // Calculate exponential backoff delay: CHUNK_RETRY_DELAY * (2 ^ (attempt - 1))
+    const backoffDelay = config.CHUNK_RETRY_DELAY * Math.pow(2, attempt - 1);
 
     const retryMessage = {
       type: MESSAGE_TYPES.RETRY_CHUNK,
@@ -326,10 +407,16 @@ class WebSocketServer {
       timestamp: new Date().toISOString()
     };
 
-    logger.info(`Sending RETRY_CHUNK for request ${requestId}, chunk ${chunkIndex}, attempt ${attempt}, reason: ${reason}`);
-    this.sendToClient(clientId, retryMessage);
-
-    this.downloadManager.updateRetryTracking(requestId, chunkIndex, attempt);
+    logger.info(`Scheduling RETRY_CHUNK for request ${requestId}, chunk ${chunkIndex}, attempt ${attempt}/${config.MAX_CHUNK_RETRY_ATTEMPTS}, reason: ${reason}, delay: ${backoffDelay}ms`);
+    
+    // Update retry tracking before sending
+    this.downloadManager.updateRetryTracking(requestId, chunkIndex, attempt, 'pending', reason);
+    
+    // Send retry message after backoff delay
+    setTimeout(() => {
+      this.sendToClient(clientId, retryMessage);
+      logger.info(`Sent RETRY_CHUNK for request ${requestId}, chunk ${chunkIndex}, attempt ${attempt}`);
+    }, backoffDelay);
   }
 
   generateClientId() {
