@@ -117,7 +117,12 @@ main() {
 
     echo "Generating test files for development..."
     node scripts/generate-test-files.js
-    print_success "Test files generated"
+
+    # Copy generated test files to client data directory
+    echo "Copying test files to client/data/..."
+    mkdir -p client/data
+    cp test-files/* client/data/ 2>/dev/null || true
+    print_success "Test files generated and copied to client/data/"
     
     # Setup git hooks
     print_header "Setting up Git Hooks"

@@ -2,39 +2,87 @@
 
 A robust chunk-based file download system with WebSocket communication, automatic retry logic, and comprehensive error handling.
 
-## Features
+## TL;DR - Quick Commands
 
-- **Chunk-based Downloads**: Files are split into configurable chunks for efficient transfer
-- **WebSocket Communication**: Real-time bidirectional communication between server and clients
-- **Automatic Retry Logic**: Intelligent retry mechanism with exponential backoff
-- **Progress Tracking**: Real-time progress reporting with detailed statistics
-- **Multiple Client Types**: Support for CLI, web, and mobile clients
-- **Health Monitoring**: Built-in health checks and monitoring endpoints
-- **Comprehensive API**: RESTful API for download management
-- **Error Handling**: Graceful error handling with detailed error codes
+```bash
+# 1. Run setup script (installs everything)
+./scripts/setup.sh
+
+# 2. Start server (Terminal 1)
+cd server && npm start
+
+# 3. Start client (Terminal 2)
+cd client && CLIENT_ID=my-client npm start
+
+# 4. Download a file (Terminal 3)
+silentmode download my-client -f [absolute path of the file] --watch
+
+# 5. Run E2E tests
+./scripts/e2e-test.sh
+
+# 6. Run unit tests
+cd server && npm test
+```
+
+## Complete Guide - How to Run This Repo
+
+This guide provides detailed step-by-step instructions.
 
 ## Table of Contents
 
+- [Prerequisites](#prerequisites)
 - [Installation](#installation)
-- [Quick Start](#quick-start)
+- [Running the Application](#running-the-application)
+- [Running E2E Tests](#running-e2e-tests)
+- [Running Unit Tests](#running-unit-tests)
 - [Architecture](#architecture)
 - [API Documentation](#api-documentation)
-- [WebSocket Protocol](#websocket-protocol)
-- [CLI Usage](#cli-usage)
 - [Configuration](#configuration)
-- [Testing](#testing)
-- [Contributing](#contributing)
-- [License](#license)
+- [Troubleshooting](#troubleshooting)
+
+## Prerequisites
+
+Before you begin, ensure you have the following installed:
+
+- **Node.js 18 or higher** - [Download here](https://nodejs.org/)
+- **npm 8 or higher** - Usually comes with Node.js
+- **Git** - [Download here](https://git-scm.com/)
+
+Verify your installation:
+```bash
+node --version  # Should be v18.x or higher
+npm --version   # Should be 8.x or higher
+```
+
+**Note**: The setup script (`scripts/setup.sh`) automatically checks these prerequisites for you.
 
 ## Installation
 
-### Prerequisites
+### Method 1: Automated Setup (Recommended)
 
-- Node.js 18 or higher
-- npm 8 or higher
-- Git
+The easiest way to get started is using the setup script, which handles everything automatically:
 
-### Clone and Install
+```bash
+# Clone the repository
+git clone https://github.com/your-org/silentmode-assessment.git
+cd silentmode-assessment
+
+# Run the setup script
+chmod +x scripts/setup.sh
+./scripts/setup.sh
+```
+
+**The setup script will:**
+- Check prerequisites (Node.js 18+, npm)
+- Install all dependencies (root, server, client)
+- Create necessary directories (logs, downloads)
+- Set up environment files from templates
+- Generate test files
+- Verify the installation
+
+### Method 2: Manual Installation
+
+If you prefer to install manually:
 
 ```bash
 # Clone the repository
@@ -52,533 +100,499 @@ npm install
 cd ..
 ```
 
-**Note**: Make sure to install dependencies for both server and client directories separately. The root `package.json` only contains shared dependencies.
+**Important**: Both server and client have separate `package.json` files and must be installed independently.
 
-## Quick Start
+## Running the Application
 
-### 1. Install Dependencies
+Follow these steps to run the complete download system:
 
-Make sure you've installed dependencies for both server and client:
+### Step 1: Start the Server
 
-```bash
-# Install server dependencies
-cd server
-npm install
-cd ..
-
-# Install client dependencies
-cd client
-npm install
-cd ..
-```
-
-### 2. Start the Server
+Open a terminal in the project root directory:
 
 ```bash
-# Navigate to server directory and start
 cd server
 npm start
 ```
 
-The server will start on:
-- HTTP API: http://localhost:3000
-- WebSocket: ws://localhost:8080
+You should see output indicating the server has started:
+- HTTP API Server: `http://localhost:3000`
+- WebSocket Server: `ws://localhost:8080`
 
-### 3. Start a Client
+**Keep this terminal running** - the server must stay active for the system to work.
+
+### Step 2: Create Test Data (Optional)
+
+In a new terminal, create a test file for the client to serve:
 
 ```bash
-# In a new terminal, navigate to client directory
+mkdir -p ~/data
+echo "This is a test file for download testing" > ~/data/test.txt
+```
+
+### Step 3: Start the Client
+
+Open a **new terminal** (keep the server running in the first terminal):
+
+```bash
 cd client
 CLIENT_ID=my-client npm start
 ```
 
-### 4. Download a File
+The client will connect to the server via WebSocket. You should see connection confirmation in both terminals.
+
+**Keep this terminal running** as well.
+
+### Step 4: Initiate a Download
+
+Open a **third terminal** to trigger downloads. You have two options:
+
+#### Option A: Using the CLI Tool (Recommended for Testing)
 
 ```bash
-# Using the CLI
-node server/cli.js download --clientId my-client --filePath /path/to/file.txt
+# From the project root
+node server/cli.js download -c my-client -f data/test.txt
+```
 
-# Or via REST API
+This will:
+- Request the file from the client
+- Download it in chunks
+- Save it to `server/downloads/`
+- Show progress in real-time
+
+#### Option B: Using the REST API
+
+```bash
 curl -X POST http://localhost:3000/api/v1/downloads \
   -H "Content-Type: application/json" \
-  -d '{"clientId":"my-client","filePath":"/path/to/file.txt"}'
+  -d '{"clientId":"my-client","filePath":"data/test.txt"}'
 ```
 
-## Architecture
+### Step 5: Verify the Download
 
-```
-┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
-│   CLI Tool      │     │   Web Client   │     │  Mobile Client  │
-└─────────┬───────┘     └─────────┬───────┘     └─────────┬───────┘
-          │                       │                       │
-          └───────────────────────┴───────────────────────┘
-                                  │
-                    ┌─────────────┴─────────────┐
-                    │      WebSocket Gateway    │
-                    └─────────────┬─────────────┘
-                                  │
-                    ┌─────────────┴─────────────┐
-                    │      Download Server      │
-                    └─────────────┬─────────────┘
-                                  │
-          ┌───────────────────────┴───────────────────────┐
-          │                       │                       │
-┌─────────┴───────┐     ┌─────────┴───────┐     ┌─────────┴───────┐
-│  File Storage   │     │   Redis Cache   │     │   PostgreSQL    │
-└─────────────────┘     └─────────────────┘     └─────────────────┘
+Check that the file was downloaded successfully:
+
+```bash
+ls -la server/downloads/
+cat server/downloads/test.txt
 ```
 
-### Core Components
+You should see your test file in the downloads directory.
 
-- **WebSocket Server**: Handles real-time communication with clients
-- **REST API Server**: Manages download operations and client registration
+## Architecture Overview
+
+```
+┌─────────────────┐
+│   CLI Tool      │  Triggers downloads
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│  REST API       │  Port 3000 - HTTP endpoints
+│  Server         │
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│  WebSocket      │  Port 8080 - Real-time communication
+│  Server         │
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│  Client         │  Serves files, sends chunks
+│  (File Source)  │
+└─────────────────┘
+```
+
+**Core Components:**
+- **REST API Server**: Manages download requests and provides status endpoints
+- **WebSocket Server**: Handles real-time bidirectional communication
 - **Download Manager**: Coordinates chunk distribution and tracking
-- **Retry Engine**: Handles failed chunk retries with intelligent backoff
-- **Client Registry**: Manages connected clients and their metadata
+- **Retry Engine**: Automatically retries failed chunks with exponential backoff
+- **Client**: Serves files from its local filesystem
 
-## API Documentation
+## Configuration (Optional)
 
-### Base URL
+Both server and client work with default settings. You only need to create `.env` files if you want to customize behavior.
 
-```
-http://localhost:3000/api/v1
-```
+### Server Configuration (Optional)
 
-### Endpoints
-
-#### Health Check
-
-```http
-GET /health
-```
-
-#### Client Management
-
-```http
-POST   /clients        # Register a new client
-GET    /clients        # List all clients
-GET    /clients/{id}   # Get client details
-```
-
-#### Download Management
-
-```http
-POST   /downloads           # Initiate a download
-GET    /downloads           # List all downloads
-GET    /downloads/{id}      # Get download status
-DELETE /downloads/{id}      # Cancel/delete a download
-GET    /downloads/{id}/chunks # Get chunk status
-```
-
-### Example Responses
-
-#### Download Initiation
-
-```json
-{
-  "success": true,
-  "requestId": "req-123456",
-  "status": "pending"
-}
-```
-
-#### Download Status
-
-```json
-{
-  "success": true,
-  "requestId": "req-123456",
-  "clientId": "client-001",
-  "status": "downloading",
-  "progress": {
-    "chunksReceived": 45,
-    "totalChunks": 100,
-    "percentage": 45.0,
-    "bytesReceived": 47185920,
-    "retriedChunks": []
-  },
-  "retryStats": {
-    "totalRetries": 0,
-    "retriedChunks": [],
-    "retrySuccessRate": 0
-  }
-}
-```
-
-## WebSocket Protocol
-
-### Connection
-
-```javascript
-const ws = new WebSocket('ws://localhost:8080');
-```
-
-### Message Types
-
-#### Client to Server
-
-- `REGISTER` - Register client with server
-- `DOWNLOAD_REQUEST` - Request a file download
-- `DOWNLOAD_ACK` - Acknowledge download request
-- `FILE_CHUNK` - Send file chunk
-- `DOWNLOAD_COMPLETE` - Mark download as complete
-- `RETRY_CHUNK` - Request chunk retry
-- `CANCEL_DOWNLOAD` - Cancel active download
-- `PING` - Heartbeat ping
-
-#### Server to Client
-
-- `REGISTER_ACK` - Registration confirmation
-- `DOWNLOAD_REQUEST` - Server requests download
-- `CHUNK_REQUEST` - Request specific chunk
-- `ERROR` - Error notification
-- `PONG` - Heartbeat response
-
-### Example Messages
-
-#### Client Registration
-
-```json
-{
-  "type": "REGISTER",
-  "clientId": "client-001",
-  "clientType": "cli",
-  "version": "1.0.0"
-}
-```
-
-#### File Chunk Transfer
-
-```json
-{
-  "type": "FILE_CHUNK",
-  "requestId": "req-123456",
-  "chunkIndex": 0,
-  "totalChunks": 100,
-  "data": "base64-encoded-data",
-  "checksum": "sha256-hash"
-}
-```
-
-## CLI Usage
-
-The CLI tool provides command-line access to the download system.
-
-### Commands
-
-#### Download a File
-
-```bash
-node server/cli.js download [options]
-
-Options:
-  -c, --clientId <id>     Client ID (required)
-  -f, --filePath <path>   File path (required)
-  -o, --output <path>     Output directory (default: ./downloads)
-  -w, --watch            Watch progress with progress bar
-  -t, --timeout <ms>      Download timeout (default: 30000)
-  -h, --help             Show help
-```
-
-Examples:
-
-```bash
-# Basic download
-node server/cli.js download -c my-client -f /path/to/file.txt
-
-# Download with progress bar
-node server/cli.js download -c my-client -f /path/to/file.txt -w
-
-# Download to specific directory
-node server/cli.js download -c my-client -f /path/to/file.txt -o /tmp/downloads
-```
-
-#### List Clients
-
-```bash
-node server/cli.js clients list
-
-Options:
-  -t, --type <type>   Filter by client type (cli, web, mobile)
-  -s, --status <status> Filter by status (active, inactive)
-  -l, --limit <num>   Limit results (default: 10)
-```
-
-#### Download Status
-
-```bash
-node server/cli.js downloads status <requestId>
-
-Options:
-  -w, --watch    Watch status updates
-  -j, --json     Output as JSON
-```
-
-#### Cancel Download
-
-```bash
-node server/cli.js downloads cancel <requestId>
-```
-
-#### Health Check
-
-```bash
-node server/cli.js health
-```
-
-## Configuration
-
-Both server and client have their own `.env` files in their respective directories. They do **not** read from a root `.env` file.
-
-### Server Configuration
-
-Create `server/.env`:
+Create `server/.env` to customize server settings:
 
 ```env
-PORT=3000
-WS_PORT=8080
-DOWNLOAD_DIR=./downloads
-LOG_LEVEL=info
-CHUNK_SIZE=1048576
-MAX_CHUNK_RETRY_ATTEMPTS=3
-CHUNK_RETRY_DELAY=1000
-HEARTBEAT_INTERVAL=30000
-DOWNLOAD_TIMEOUT=300000
+# Server ports
+PORT=3000                      # REST API port
+WS_PORT=8080                   # WebSocket port
+
+# Download settings
+DOWNLOAD_DIR=./downloads       # Where downloaded files are saved
+CHUNK_SIZE=1048576             # Chunk size in bytes (default: 1MB)
+
+# Retry settings
+MAX_CHUNK_RETRY_ATTEMPTS=3     # Max retries for failed chunks
+CHUNK_RETRY_DELAY=1000         # Base retry delay in ms
+
+# Logging
+LOG_LEVEL=info                 # Options: debug, info, warn, error
 ```
 
 See `server/.env.example` for all available options.
 
-### Client Configuration
+### Client Configuration (Optional)
 
-Create `client/.env`:
+Create `client/.env` to customize client settings:
 
 ```env
-CLIENT_ID=my-client
-SERVER_WS_URL=ws://localhost:8080
-LOG_LEVEL=info
-RECONNECT_INTERVAL=5000
-MAX_RECONNECT_ATTEMPTS=10
-HEARTBEAT_INTERVAL=30000
+# Client identity
+CLIENT_ID=my-client            # Unique client identifier
+
+# Server connection
+SERVER_WS_URL=ws://localhost:8080  # WebSocket server URL
+
+# Connection settings
+RECONNECT_INTERVAL=5000        # Reconnect delay in ms
+MAX_RECONNECT_ATTEMPTS=10      # Max reconnection attempts
+
+# Logging
+LOG_LEVEL=info                 # Options: debug, info, warn, error
 ```
 
 See `client/.env.example` for all available options.
 
-## Testing
+**Note**: You can also set environment variables directly when starting:
+```bash
+cd client
+CLIENT_ID=custom-client LOG_LEVEL=debug npm start
+```
 
-### Unit Tests
+## Running E2E Tests
+
+End-to-end tests verify the complete system works together. The test script automatically starts the server and client, runs a full download, and verifies the results.
+
+### Prerequisites for E2E Tests
+
+Make sure you've completed the [Installation](#installation) steps first (dependencies must be installed).
+
+### Step 1: Make the Test Script Executable
 
 ```bash
-# Run server tests
+chmod +x scripts/e2e-test.sh
+```
+
+### Step 2: Run E2E Tests
+
+From the project root directory:
+
+```bash
+./scripts/e2e-test.sh
+```
+
+### What the E2E Test Does
+
+The test automatically:
+1. Starts the server on ports 3000 (HTTP) and 8080 (WebSocket)
+2. Starts a test client with a unique ID
+3. Creates a test file in `~/data/`
+4. Runs 11 test cases including:
+   - Health check
+   - Client connection
+   - File download initiation
+   - Download progress tracking
+   - Download completion verification
+   - Error handling (invalid IDs, missing files)
+   - Client listing
+5. Cleans up all processes and temporary files
+6. Shows test results with pass/fail counts
+
+### Reading E2E Test Results
+
+The script outputs color-coded results:
+- **Green [PASS]**: Test succeeded
+- **Red [FAIL]**: Test failed
+- **Yellow [INFO]**: Informational messages
+- **Blue [TEST]**: Test being executed
+
+Detailed logs are saved to: `logs/e2e-test-YYYYMMDD-HHMMSS.log`
+
+### Example Output
+
+```
+[INFO] Starting E2E Test Suite
+[PASS] Server started successfully (PID: 12345)
+[PASS] Client started successfully (PID: 12346, ID: test-client-1234567890)
+[TEST] Health Check
+[PASS] Health Check
+[TEST] Start Download
+[PASS] Download started (ID: req-abc123)
+[INFO] Download progress: 50.0%
+[PASS] Download completed
+...
+[INFO] Test Results:
+  Passed: 11
+  Failed: 0
+  Total: 11
+[INFO] All tests passed! ✓
+```
+
+## Running Unit Tests
+
+Unit tests verify individual components and functions.
+
+### Run All Unit Tests
+
+```bash
 cd server
 npm test
 ```
 
-### Manual Testing
+This runs the Jest test suite which includes:
+- WebSocket server tests
+- Chunk manager tests
+- Validation tests
+- REST API integration tests
+- Download management tests
 
-Various test files are available in the server directory:
-- `test-download.js` - Basic download test
-- `test-heartbeat.js` - Heartbeat mechanism test
-- `test-retry-*.js` - Retry functionality tests
-- `rest-api.test.js` - REST API tests
-
-Run individual tests:
+### Run Specific Test Files
 
 ```bash
 cd server
-node test-download.js
-node test-heartbeat.js
+
+# Test WebSocket functionality
+npm test -- websocket-server.test.js
+
+# Test chunk management
+npm test -- chunk-manager.edge-cases.test.js
+
+# Test validation
+npm test -- validation.test.js
 ```
 
-## Development
+### Test Coverage
 
-### Project Structure
+Generate a coverage report:
+
+```bash
+cd server
+npm test -- --coverage
+```
+
+## Project Structure
 
 ```
 silentmode-assessment/
 ├── client/                 # Client application
 │   ├── src/               # Client source code
 │   ├── data/              # Test data files
-│   ├── logs/              # Client logs
-│   └── package.json
+│   ├── logs/              # Client logs (auto-generated)
+│   └── package.json       # Client dependencies
 ├── server/                # Server application
 │   ├── src/               # Server source code
-│   ├── cli.js             # CLI tool
-│   ├── logs/              # Server logs
-│   ├── downloads/         # Download directory
-│   ├── test-*.js          # Test files
-│   └── package.json
-├── shared/                # Shared code
-│   └── protocol/          # Protocol definitions
-└── README.md
+│   ├── cli.js             # CLI tool for downloads
+│   ├── logs/              # Server logs (auto-generated)
+│   ├── downloads/         # Downloaded files stored here
+│   └── package.json       # Server dependencies
+├── scripts/               # Utility scripts
+│   └── e2e-test.sh        # End-to-end test script
+└── README.md              # This file
 ```
 
-### Running in Development
+## Key Features
 
-```bash
-# Start server
-cd server
-npm start
-
-# Start client (in a new terminal)
-cd client
-npm start
-```
-
-### Logging
-
-Configure logging level with `LOG_LEVEL` environment variable:
-
-- `debug` - Detailed debugging information
-- `info` - General information (default)
-- `warn` - Warning messages
-- `error` - Error messages only
-
-Logs are written to:
-- Console output
-- `logs/server.log` (server logs)
-- `logs/client.log` (client logs)
-
-## Performance Considerations
-
-### Chunk Size
-
-The default chunk size is 1MB. Adjust based on:
-- Network conditions
-- File sizes
-- Memory constraints
-
-```env
-CHUNK_SIZE=1048576  # 1MB chunks
-```
-
-### Concurrent Downloads
-
-The server supports concurrent downloads. Configure limits:
-
-```env
-MAX_CONCURRENT_DOWNLOADS=10
-MAX_DOWNLOADS_PER_CLIENT=5
-```
-
-### Retry Strategy
-
-The retry mechanism uses:
-- Exponential backoff: `delay = baseDelay * (2 ^ attempt)`
-- Maximum attempts: 3 (configurable)
-- Maximum delay: 30 seconds
-- Jitter: ±25% random variation
+- **Chunk-based Downloads**: Files are split into 1MB chunks for efficient transfer
+- **WebSocket Communication**: Real-time bidirectional communication
+- **Automatic Retry Logic**: Failed chunks are automatically retried with exponential backoff
+- **Progress Tracking**: Real-time download progress with percentage and bytes transferred
+- **Health Monitoring**: Built-in health checks and monitoring endpoints
+- **Comprehensive Testing**: Unit tests and full E2E test suite
 
 ## Troubleshooting
 
-### Common Issues
+### Common Issues and Solutions
 
-#### Missing Dependencies
+#### Error: "Cannot find module" or Missing Dependencies
 
-If you encounter "Cannot find module" errors:
+**Problem**: You see errors about missing packages or modules.
 
+**Solution**:
+
+Option 1 - Re-run the setup script (easiest):
+```bash
+./scripts/setup.sh
+```
+
+Option 2 - Manual reinstall:
 ```bash
 # Reinstall server dependencies
 cd server
+rm -rf node_modules package-lock.json
 npm install
 cd ..
 
 # Reinstall client dependencies
 cd client
+rm -rf node_modules package-lock.json
 npm install
 cd ..
 ```
 
-Common missing packages:
-- `express-validator` - Install with: `cd server && npm install express-validator`
-- `ws` - Install with: `npm install ws` (in root, server, or client as needed)
+#### Error: "Port 3000 or 8080 already in use"
 
-#### Server Won't Start
+**Problem**: Another process is using the required ports.
 
+**Solution**:
 ```bash
-# Check if ports are in use
-netstat -tlnp | grep -E ":(3000|8080)"
+# Check what's using the ports
+lsof -i :3000
+lsof -i :8080
 
-# Kill existing processes
-pkill -f "node server"
+# Kill the processes (replace PID with actual process ID)
+kill -9 <PID>
+
+# Or kill all node processes (use with caution)
+pkill -9 node
 ```
 
-#### Client Can't Connect
+#### Error: "Client Can't Connect to Server"
 
-1. Verify server is running
-2. Check WebSocket URL in client config
-3. Verify firewall settings
-4. Check client logs for errors
+**Problem**: Client shows connection errors or doesn't register with server.
 
-#### Downloads Fail
+**Solution**:
+1. Verify the server is running:
+   ```bash
+   curl http://localhost:3000/api/v1/health
+   ```
+2. Check server logs: `server/logs/server.log`
+3. Check client logs: `client/logs/client.log`
+4. Verify WebSocket URL in `client/.env` is `ws://localhost:8080`
+5. Check firewall isn't blocking port 8080
 
-1. Check file path exists on client
-2. Verify client is registered
-3. Check server logs for errors
-4. Verify sufficient disk space
+#### Error: "Download Fails" or "File Not Found"
 
-#### Performance Issues
+**Problem**: Downloads fail or can't find the file.
 
-1. Adjust chunk size
-2. Check network bandwidth
-3. Monitor memory usage
-4. Review retry configuration
+**Solution**:
+1. Verify the file path is **relative to the client's home directory** (e.g., `data/test.txt` for `~/data/test.txt`)
+2. Check the file exists on the **client machine** (not server):
+   ```bash
+   ls -la ~/data/test.txt
+   ```
+3. Ensure client has read permissions for the file
+4. Check server logs for error details: `server/logs/server.log`
 
-### Debug Mode
+#### E2E Tests Fail
 
-Enable debug logging:
+**Problem**: E2E test script exits with errors.
+
+**Solution**:
+1. Make sure all dependencies are installed (see [Installation](#installation))
+2. Kill any existing server/client processes:
+   ```bash
+   pkill -9 node
+   ```
+3. Check test logs: `logs/e2e-test-YYYYMMDD-HHMMSS.log`
+4. Verify ports 3000 and 8080 are available
+5. Run the script with verbose output to see what fails
+
+#### Enable Debug Mode
+
+For detailed logging to troubleshoot issues:
 
 ```bash
+# Server debug mode
+cd server
+LOG_LEVEL=debug npm start
+
+# Client debug mode
+cd client
 LOG_LEVEL=debug npm start
 ```
 
-### Health Checks
+Logs are written to:
+- `server/logs/server.log`
+- `client/logs/client.log`
 
-Monitor system health:
+#### Check System Health
+
+Verify everything is running:
 
 ```bash
-# Server health
+# Check server health
 curl http://localhost:3000/api/v1/health
 
-# Client status
+# List connected clients
+curl http://localhost:3000/api/v1/clients
+
+# Check active downloads
+curl http://localhost:3000/api/v1/downloads
+```
+
+## Additional Resources
+
+### Useful Scripts
+
+```bash
+# Setup script - Install everything and set up environment
+./scripts/setup.sh
+
+# E2E test script - Run complete end-to-end tests
+./scripts/e2e-test.sh
+
+# Generate test files - Create test files of any size
+node scripts/generate-test-files.js [filename] [sizeMB]
+```
+
+### CLI Commands Reference
+
+```bash
+# Download a file
+node server/cli.js download -c <clientId> -f <filePath> [options]
+  -w, --watch          # Show progress bar
+  -o, --output <path>  # Output directory (default: ./downloads)
+
+# List clients
 node server/cli.js clients list
+
+# Check download status
+node server/cli.js downloads status <requestId>
+
+# Check server health
+node server/cli.js health
+```
+
+### REST API Endpoints
+
+```
+GET  /api/v1/health              # Server health check
+GET  /api/v1/clients             # List connected clients
+POST /api/v1/downloads           # Start a download
+GET  /api/v1/downloads           # List all downloads
+GET  /api/v1/downloads/:id       # Get download status
+```
+
+### Understanding the System
+
+**How it works:**
+1. **Client** runs on a machine with files to share (serves files)
+2. **Server** coordinates downloads and manages chunk distribution
+3. **CLI Tool** triggers downloads from the client through the server
+4. Files are split into chunks, transferred via WebSocket, and reassembled on the server
+
+**Data flow:**
+```
+CLI Request → Server → Client (via WebSocket)
+Client reads file → Sends chunks → Server reassembles → Saves to downloads/
 ```
 
 ## Contributing
 
+Contributions are welcome! Please:
 1. Fork the repository
 2. Create a feature branch
-3. Make your changes
-4. Add tests for new functionality
-5. Run the test suite
-6. Submit a pull request
-
-### Code Style
-
-- Use ESLint for JavaScript linting
-- Follow conventional commit messages
-- Add JSDoc comments for new functions
-- Update documentation for API changes
+3. Add tests for new functionality
+4. Run the test suite (`npm test` and `./scripts/e2e-test.sh`)
+5. Submit a pull request
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## Support
-
-For support and questions:
-
-- Check the README and inline code documentation
-- Review test files for usage examples
-- Check server and client logs for debugging
-
-## Changelog
-
-### v1.0.0
-
-- Initial release
-- Chunk-based download system
-- WebSocket communication
-- Retry mechanism
-- CLI tool
-- REST API
-- Comprehensive testing suite
+MIT License - see LICENSE file for details.
