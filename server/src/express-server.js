@@ -87,6 +87,64 @@ class ExpressServer {
       res.json(response);
     });
 
+    this.app.delete('/api/v1/downloads/:requestId', async (req, res) => {
+      const { requestId } = req.params;
+      const download = this.wsServer.downloadManager.getDownload(requestId);
+      
+      if (!download) {
+        return res.status(404).json({
+          success: false,
+          error: 'Download not found'
+        });
+      }
+      
+      // Cannot cancel completed downloads
+      if (download.status === 'completed' || download.status === 'failed') {
+        return res.status(409).json({
+          success: false,
+          error: 'Cannot cancel completed download'
+        });
+      }
+      
+      try {
+        // Send CANCEL_DOWNLOAD message to client
+        const client = this.wsServer.clients.get(download.clientId);
+        if (client && client.readyState === 1) { // WebSocket.OPEN
+          client.send(JSON.stringify({
+            type: 'CANCEL_DOWNLOAD',
+            requestId: requestId
+          }));
+          logger.info(`Sent CANCEL_DOWNLOAD to client ${download.clientId} for request ${requestId}`);
+        }
+        
+        // Update download status to cancelled
+        await this.wsServer.downloadManager.cancelDownload(requestId, 'Cancelled by user request');
+        
+        // Clean up temp files
+        if (download.tempFilePath && require('fs').existsSync(download.tempFilePath)) {
+          try {
+            await require('fs').promises.unlink(download.tempFilePath);
+            logger.info(`Cleaned up temp file for cancelled download ${requestId}`);
+          } catch (cleanupError) {
+            logger.error(`Error cleaning up temp file for ${requestId}:`, cleanupError);
+          }
+        }
+        
+        res.json({
+          success: true,
+          requestId: requestId,
+          status: 'cancelled'
+        });
+        
+      } catch (error) {
+        logger.error(`Error cancelling download ${requestId}:`, error);
+        res.status(500).json({
+          success: false,
+          error: 'Failed to cancel download'
+        });
+      }
+    });
+
     this.app.use((req, res) => {
       res.status(404).json({ error: 'Not found' });
     });
