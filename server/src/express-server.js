@@ -31,10 +31,10 @@ class ExpressServer {
     this.app.get('/api/v1/health', (req, res) => {
       const uptime = Math.floor((Date.now() - this.startTime) / 1000);
       const connectedClients = this.wsServer.clients.size;
-      
+
       const activeDownloads = Array.from(this.wsServer.downloadManager.downloads.values())
         .filter(download => download.status === 'in_progress').length;
-      
+
       res.json({
         status: 'healthy',
         uptime,
@@ -143,6 +143,33 @@ class ExpressServer {
           error: 'Failed to cancel download'
         });
       }
+    });
+
+    this.app.get('/api/v1/clients', (req, res) => {
+      const statusFilter = req.query.status;
+
+      const allClients = Array.from(this.wsServer.clients.values()).map(client => ({
+        clientId: client.registeredId || client.id,
+        connectedAt: client.connectedAt.toISOString(),
+        lastHeartbeat: client.lastHeartbeat.toISOString(),
+        status: 'connected',
+        metadata: {}
+      }));
+
+      let clients = allClients;
+      if (statusFilter) {
+        if (statusFilter === 'connected') {
+          clients = allClients;
+        } else {
+          clients = [];
+        }
+      }
+
+      res.json({
+        success: true,
+        clients,
+        total: clients.length
+      });
     });
 
     this.app.use((req, res) => {
