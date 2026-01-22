@@ -1,7 +1,7 @@
 const WebSocket = require('ws');
 const logger = require('./utils/logger');
 const config = require('./config');
-const { MESSAGE_TYPES, validateMessage, ERROR_CODES } = require('../../shared/protocol');
+const { MESSAGE_TYPES, validateMessage, ERROR_CODES, RETRY_REASONS } = require('../../shared/protocol');
 const DownloadManager = require('./download-manager');
 
 class WebSocketServer {
@@ -184,7 +184,7 @@ class WebSocketServer {
     }
   }
 
-  handleFileChunk(clientId, message) {
+  async handleFileChunk(clientId, message) {
     logger.debug(`Received FILE_CHUNK from ${clientId} for request ${message.requestId}, chunk ${message.chunkIndex + 1}/${message.totalChunks}`);
     
     const client = this.clients.get(clientId);
@@ -194,7 +194,19 @@ class WebSocketServer {
     }
     
     // Forward to download manager for processing
-    this.downloadManager.handleFileChunk(message.requestId, message);
+    const result = await this.downloadManager.handleFileChunk(message.requestId, message);
+    
+    // If chunk failed and needs retry, send RETRY_CHUNK message
+    if (!result.success && result.needsRetry) {
+      const download = this.downloadManager.getDownload(message.requestId);
+      if (download) {
+        const reason = result.error === 'CHUNK_CHECKSUM_FAILED' 
+          ? RETRY_REASONS.CHECKSUM_FAILED 
+          : RETRY_REASONS.TIMEOUT;
+        
+        this.sendRetryChunk(clientId, message.requestId, result.chunkIndex, reason);
+      }
+    }
     
     // Forward chunk to the requester
     const download = this.downloadManager.getDownload(message.requestId);
@@ -203,7 +215,7 @@ class WebSocketServer {
     }
   }
 
-  handleDownloadComplete(clientId, message) {
+  async handleDownloadComplete(clientId, message) {
     logger.info(`Received DOWNLOAD_COMPLETE from ${clientId} for request ${message.requestId}, totalChunks: ${message.totalChunks}`);
     
     const client = this.clients.get(clientId);
@@ -212,8 +224,21 @@ class WebSocketServer {
       return;
     }
     
+    // Check for missing chunks before processing completion
+    const missingChunks = this.downloadManager.getMissingChunks(message.requestId);
+    if (missingChunks.length > 0) {
+      logger.warn(`Download ${message.requestId} has ${missingChunks.length} missing chunks, sending retry requests`);
+      
+      // Send RETRY_CHUNK for each missing chunk
+      for (const chunkIndex of missingChunks) {
+        this.sendRetryChunk(clientId, message.requestId, chunkIndex, RETRY_REASONS.MISSING);
+      }
+      
+      return;
+    }
+    
     // Forward to download manager for processing
-    this.downloadManager.handleDownloadComplete(message.requestId, message);
+    await this.downloadManager.handleDownloadComplete(message.requestId, message);
     
     // Forward completion to the requester
     const download = this.downloadManager.getDownload(message.requestId);
@@ -273,6 +298,38 @@ class WebSocketServer {
       message,
       details
     });
+  }
+
+  /**
+   * Send RETRY_CHUNK message to client
+   * @param {string} clientId - Target client ID
+   * @param {string} requestId - Request ID
+   * @param {number} chunkIndex - Chunk index to retry
+   * @param {string} reason - Retry reason (CHECKSUM_FAILED, TIMEOUT, MISSING)
+   */
+  sendRetryChunk(clientId, requestId, chunkIndex, reason) {
+    const download = this.downloadManager.getDownload(requestId);
+    if (!download) {
+      logger.error(`Cannot send RETRY_CHUNK: download ${requestId} not found`);
+      return;
+    }
+
+    const failedChunk = download.failedChunks.get(chunkIndex);
+    const attempt = failedChunk ? failedChunk.attempts : 1;
+
+    const retryMessage = {
+      type: MESSAGE_TYPES.RETRY_CHUNK,
+      requestId: requestId,
+      chunkIndex: chunkIndex,
+      attempt: attempt,
+      reason: reason,
+      timestamp: new Date().toISOString()
+    };
+
+    logger.info(`Sending RETRY_CHUNK for request ${requestId}, chunk ${chunkIndex}, attempt ${attempt}, reason: ${reason}`);
+    this.sendToClient(clientId, retryMessage);
+
+    this.downloadManager.updateRetryTracking(requestId, chunkIndex, attempt);
   }
 
   generateClientId() {
