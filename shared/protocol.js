@@ -39,6 +39,13 @@ const ERROR_CODES = {
   INVALID_REQUEST: 'INVALID_REQUEST'
 };
 
+// Retry Reasons
+const RETRY_REASONS = {
+  CHECKSUM_FAILED: 'CHECKSUM_FAILED',
+  TIMEOUT: 'TIMEOUT',
+  MISSING: 'MISSING'
+};
+
 // Constants
 const CONSTANTS = {
   CHUNK_SIZE: 1048576, // 1MB in bytes
@@ -75,7 +82,10 @@ const MESSAGE_SCHEMAS = {
   },
   [MESSAGE_TYPES.RETRY_CHUNK]: {
     requestId: 'string',
-    chunkIndex: 'number'
+    chunkIndex: 'number',
+    attempt: 'number',
+    reason: 'string',
+    timestamp: 'string'
   },
   [MESSAGE_TYPES.DOWNLOAD_COMPLETE]: {
     requestId: 'string',
@@ -135,6 +145,7 @@ function validateMessage(type, data) {
 module.exports = {
   MESSAGE_TYPES,
   ERROR_CODES,
+  RETRY_REASONS,
   CONSTANTS,
   MESSAGE_SCHEMAS,
   validateMessage
@@ -143,6 +154,7 @@ module.exports = {
 // Also provide named exports for convenience
 module.exports.MessageTypes = MESSAGE_TYPES;
 module.exports.ErrorCodes = ERROR_CODES;
+module.exports.RetryReasons = RETRY_REASONS;
 module.exports.Constants = CONSTANTS;
 module.exports.MessageSchemas = MESSAGE_SCHEMAS;
 module.exports.validateMessage = validateMessage;

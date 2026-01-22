@@ -485,6 +485,30 @@ class DownloadManager {
   }
 
   /**
+   * Update retry tracking for a chunk
+   * @param {string} requestId - Request ID
+   * @param {number} chunkIndex - Chunk index
+   * @param {number} attempt - Current attempt number
+   */
+  updateRetryTracking(requestId, chunkIndex, attempt) {
+    const download = this.downloads.get(requestId);
+    if (!download) {
+      logger.warn(`Cannot update retry tracking: download ${requestId} not found`);
+      return;
+    }
+
+    const existingFailure = download.failedChunks.get(chunkIndex);
+    download.failedChunks.set(chunkIndex, {
+      error: existingFailure?.error || 'Retry requested',
+      timestamp: new Date(),
+      attempts: attempt,
+      lastRetryAt: new Date()
+    });
+
+    logger.debug(`Updated retry tracking for request ${requestId}, chunk ${chunkIndex}, attempt ${attempt}`);
+  }
+
+  /**
    * Clean up old downloads (optional - for memory management)
    * @param {number} maxAge - Maximum age in milliseconds
    */
