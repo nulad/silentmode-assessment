@@ -24,7 +24,7 @@ describe('GET /api/v1/downloads/:requestId', () => {
 
   test('should return 404 for non-existent download', async () => {
     const response = await request(app)
-      .get('/api/v1/downloads/non-existent-id')
+      .get('/api/v1/downloads/550e8400-e29b-41d4-a716-446655440000') // Valid UUID
       .expect(404);
 
     expect(response.body).toEqual({
@@ -34,8 +34,8 @@ describe('GET /api/v1/downloads/:requestId', () => {
   });
 
   test('should return download status for existing download', async () => {
-    // Create a test download
-    const testRequestId = 'test-req-123';
+    // Create a test download with valid UUID
+    const testRequestId = '550e8400-e29b-41d4-a716-446655440001';
     wsServer.downloadManager.createDownload('test-client', '/test/file.txt', testRequestId, 'requester-client');
     
     // Update download with test data
@@ -67,8 +67,8 @@ describe('GET /api/v1/downloads/:requestId', () => {
   });
 
   test('should include failed chunks in response', async () => {
-    // Create a test download with failed chunks
-    const testRequestId = 'test-req-failed';
+    // Create a test download with failed chunks using valid UUID
+    const testRequestId = '550e8400-e29b-41d4-a716-446655440002';
     const downloadId = wsServer.downloadManager.createDownload('test-client', '/test/file.txt', testRequestId, 'requester-client');
     
     // Simulate failed chunk using new retry tracking
@@ -99,8 +99,8 @@ describe('GET /api/v1/downloads/:requestId', () => {
   });
 
   test('should include completion details for completed downloads', async () => {
-    // Create a completed download
-    const testRequestId = 'test-req-completed';
+    // Create a completed download with valid UUID
+    const testRequestId = '550e8400-e29b-41d4-a716-446655440003';
     const completedAt = new Date();
     wsServer.downloadManager.createDownload('test-client', '/test/file.txt', testRequestId, 'requester-client');
     
@@ -137,8 +137,8 @@ describe('GET /api/v1/downloads/:requestId', () => {
   });
 
   test('should include error details for failed downloads', async () => {
-    // Create a failed download
-    const testRequestId = 'test-req-failed-download';
+    // Create a failed download with valid UUID
+    const testRequestId = '550e8400-e29b-41d4-a716-446655440004';
     wsServer.downloadManager.createDownload('test-client', '/test/file.txt', testRequestId, 'requester-client');
     
     wsServer.downloadManager.updateDownload(testRequestId, {

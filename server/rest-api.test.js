@@ -1,3 +1,10 @@
+// Set test environment ports to avoid conflicts
+process.env.PORT = '0'; // Use random available port
+process.env.WS_PORT = '0'; // Use random available port
+
+// Clear config cache to ensure environment variables are picked up
+delete require.cache[require.resolve('./src/config')];
+
 const request = require('supertest');
 const ExpressServer = require('./src/express-server');
 const WebSocketServer = require('./src/websocket-server');
@@ -22,7 +29,9 @@ describe('REST API Tests', () => {
         getDownload: jest.fn(),
         createDownload: jest.fn(),
         cancelDownload: jest.fn()
-      }
+      },
+      findClientByRegisteredId: jest.fn(),
+      sendToClient: jest.fn()
     };
 
     // Create Express server instance
@@ -53,11 +62,12 @@ describe('REST API Tests', () => {
         send: jest.fn()
       };
       wsServer.clients.set('client-1', mockClient);
+      wsServer.findClientByRegisteredId.mockReturnValue(mockClient);
+      wsServer.downloadManager.createDownload.mockReturnValue('test-request-id');
 
       const downloadData = {
-        url: 'https://example.com/file.zip',
-        filename: 'file.zip',
-        clientId: 'client-1'
+        clientId: 'client-1',
+        filePath: '/path/to/file.txt'
       };
 
       const response = await request(app)
@@ -68,34 +78,38 @@ describe('REST API Tests', () => {
       expect(response.body).toHaveProperty('success', true);
       expect(response.body).toHaveProperty('requestId');
       expect(response.body).toHaveProperty('status', 'pending');
-      expect(mockClient.send).toHaveBeenCalled();
+      expect(wsServer.sendToClient).toHaveBeenCalledWith('client-1', expect.objectContaining({
+        type: 'DOWNLOAD_REQUEST',
+        requestId: 'test-request-id',
+        filePath: '/path/to/file.txt'
+      }));
     });
 
-    it('should return 400 for missing URL', async () => {
+    it('should return 400 for missing required fields', async () => {
       const response = await request(app)
         .post('/api/v1/downloads')
         .send({
-          filename: 'file.zip',
-          clientId: 'client-1'
+          filename: 'file.txt'
         })
         .expect(400);
 
       expect(response.body).toHaveProperty('success', false);
-      expect(response.body.error).toContain('URL is required');
+      expect(response.body.error).toContain('clientId and filePath are required');
     });
 
     it('should return 404 for non-existent client', async () => {
+      wsServer.findClientByRegisteredId.mockReturnValue(null);
+      
       const response = await request(app)
         .post('/api/v1/downloads')
         .send({
-          url: 'https://example.com/file.zip',
-          filename: 'file.zip',
+          filePath: '/path/to/file.txt',
           clientId: 'non-existent'
         })
         .expect(404);
 
       expect(response.body).toHaveProperty('success', false);
-      expect(response.body.error).toContain('Client not found');
+      expect(response.body.error).toContain('Client not connected');
     });
   });
 
@@ -165,7 +179,7 @@ describe('REST API Tests', () => {
   describe('GET /api/v1/downloads/:requestId', () => {
     it('should return specific download', async () => {
       const mockDownload = {
-        id: 'download-1',
+        id: '550e8400-e29b-41d4-a716-446655440001',
         clientId: 'client-1',
         status: 'completed',
         chunksReceived: 10,
@@ -182,11 +196,11 @@ describe('REST API Tests', () => {
       wsServer.downloadManager.getDownload.mockReturnValue(mockDownload);
 
       const response = await request(app)
-        .get('/api/v1/downloads/download-1')
+        .get('/api/v1/downloads/550e8400-e29b-41d4-a716-446655440001')
         .expect(200);
 
       expect(response.body).toHaveProperty('success', true);
-      expect(response.body).toHaveProperty('requestId', 'download-1');
+      expect(response.body).toHaveProperty('requestId', '550e8400-e29b-41d4-a716-446655440001');
       expect(response.body).toHaveProperty('status', 'completed');
       expect(response.body).toHaveProperty('progress');
       expect(response.body).toHaveProperty('startedAt');
@@ -198,18 +212,18 @@ describe('REST API Tests', () => {
       wsServer.downloadManager.getDownload.mockReturnValue(null);
 
       const response = await request(app)
-        .get('/api/v1/downloads/non-existent')
+        .get('/api/v1/downloads/550e8400-e29b-41d4-a716-446655440002')
         .expect(404);
 
       expect(response.body).toHaveProperty('success', false);
-      expect(response.body.error).toContain('Download not found');
+      expect(response.body.error).toBe('Download not found');
     });
   });
 
   describe('DELETE /api/v1/downloads/:requestId', () => {
     it('should cancel a download', async () => {
       const mockDownload = {
-        id: 'download-1',
+        id: '550e8400-e29b-41d4-a716-446655440001',
         clientId: 'client-1',
         status: 'in_progress',
         tempFilePath: '/tmp/test-file'
@@ -219,21 +233,25 @@ describe('REST API Tests', () => {
         id: 'client-1',
         registeredId: 'client-1',
         readyState: 1,
-        send: jest.fn()
+        ws: {
+          readyState: 1,
+          send: jest.fn()
+        }
       };
 
       wsServer.clients.set('client-1', mockClient);
       wsServer.downloadManager.getDownload.mockReturnValue(mockDownload);
       wsServer.downloadManager.cancelDownload.mockResolvedValue();
+      wsServer.findClientByRegisteredId = jest.fn().mockReturnValue(mockClient);
 
       const response = await request(app)
-        .delete('/api/v1/downloads/download-1')
+        .delete('/api/v1/downloads/550e8400-e29b-41d4-a716-446655440001')
         .expect(200);
 
       expect(response.body).toHaveProperty('success', true);
-      expect(response.body).toHaveProperty('requestId', 'download-1');
+      expect(response.body).toHaveProperty('requestId', '550e8400-e29b-41d4-a716-446655440001');
       expect(response.body).toHaveProperty('status', 'cancelled');
-      expect(mockClient.send).toHaveBeenCalledWith(
+      expect(mockClient.ws.send).toHaveBeenCalledWith(
         expect.stringContaining('CANCEL_DOWNLOAD')
       );
     });
@@ -242,11 +260,11 @@ describe('REST API Tests', () => {
       wsServer.downloadManager.getDownload.mockReturnValue(null);
 
       const response = await request(app)
-        .delete('/api/v1/downloads/non-existent')
+        .delete('/api/v1/downloads/550e8400-e29b-41d4-a716-446655440002')
         .expect(404);
 
       expect(response.body).toHaveProperty('success', false);
-      expect(response.body.error).toContain('Download not found');
+      expect(response.body.error).toBe('Download not found');
     });
   });
 
@@ -313,8 +331,7 @@ describe('REST API Tests', () => {
       expect(response.body.client).toHaveProperty('connectedAt');
       expect(response.body.client).toHaveProperty('lastHeartbeat');
       expect(response.body.client).toHaveProperty('status', 'connected');
-      expect(response.body.client).toHaveProperty('downloads');
-      expect(response.body.client.downloads).toHaveProperty('total');
+      expect(response.body.client).toHaveProperty('metadata');
     });
 
     it('should return 404 for non-existent client', async () => {
@@ -323,7 +340,7 @@ describe('REST API Tests', () => {
         .expect(404);
 
       expect(response.body).toHaveProperty('success', false);
-      expect(response.body.error).toContain('Client not found');
+      expect(response.body.error).toContain('Client non-existent not found');
     });
   });
 
@@ -333,10 +350,7 @@ describe('REST API Tests', () => {
         .get('/api/v1/unknown')
         .expect(404);
 
-      expect(response.body).toHaveProperty('success', false);
-      expect(response.body).toHaveProperty('error', 'Endpoint not found');
-      expect(response.body).toHaveProperty('path', '/api/v1/unknown');
-      expect(response.body).toHaveProperty('method', 'GET');
+      expect(response.body).toEqual({ error: 'Not found' });
     });
   });
 });

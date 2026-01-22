@@ -18,6 +18,10 @@ const defaults = {
 
 // Validation functions for numeric values
 const validateNumber = (key, value, defaultValue) => {
+  // Special case for port 0 (random port)
+  if (value === '0' || value === 0) {
+    return 0;
+  }
   const num = parseInt(value, 10);
   if (isNaN(num) || num < 0) {
     logger.warn(`Invalid ${key}: ${value}. Using default: ${defaultValue}`);

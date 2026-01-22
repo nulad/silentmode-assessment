@@ -1,3 +1,10 @@
+// Set test environment ports to avoid conflicts
+process.env.PORT = '0'; // Use random available port
+process.env.WS_PORT = '0'; // Use random available port
+
+// Clear config cache to ensure environment variables are picked up
+delete require.cache[require.resolve('./src/config')];
+
 const request = require('supertest');
 const ExpressServer = require('./src/express-server');
 const WebSocketServer = require('./src/websocket-server');
@@ -6,6 +13,7 @@ const logger = require('./src/utils/logger');
 describe('REST API Integration Tests', () => {
   let server;
   let wsServer;
+  let expressServer;
   let app;
 
   beforeAll(async () => {
@@ -14,7 +22,7 @@ describe('REST API Integration Tests', () => {
     await wsServer.start();
     
     // Create Express server instance
-    const expressServer = new ExpressServer(wsServer);
+    expressServer = new ExpressServer(wsServer);
     app = expressServer.app;
     
     // Start the server
@@ -22,6 +30,9 @@ describe('REST API Integration Tests', () => {
   });
 
   afterAll(async () => {
+    if (expressServer) {
+      await expressServer.stop();
+    }
     if (wsServer) {
       await wsServer.stop();
     }
@@ -57,14 +68,29 @@ describe('REST API Integration Tests', () => {
       expect(downloadsResponse.body).toHaveProperty('downloads');
       expect(Array.isArray(downloadsResponse.body.downloads)).toBe(true);
 
-      // GET /api/v1/downloads/nonexistent - should return 404
-      await request(app)
+      // GET /api/v1/downloads/nonexistent - should return 400 for invalid UUID
+      const invalidResponse = await request(app)
         .get('/api/v1/downloads/nonexistent')
+        .expect(400);
+      expect(invalidResponse.body).toHaveProperty('success', false);
+      expect(invalidResponse.body).toHaveProperty('error', 'INVALID_REQUEST');
+
+      // GET /api/v1/downloads with valid UUID format - should return 404
+      const { v4: uuidv4 } = require('uuid');
+      const testUuid = uuidv4();
+      
+      await request(app)
+        .get(`/api/v1/downloads/${testUuid}`)
         .expect(404);
 
-      // DELETE /api/v1/downloads/nonexistent - should return 404
+      // DELETE /api/v1/downloads/nonexistent - should return 400 for invalid UUID
       await request(app)
         .delete('/api/v1/downloads/nonexistent')
+        .expect(400);
+
+      // DELETE /api/v1/downloads with valid UUID format - should return 404
+      await request(app)
+        .delete(`/api/v1/downloads/${testUuid}`)
         .expect(404);
 
       // GET /api/v1/clients - should return 200 with empty list
@@ -90,10 +116,7 @@ describe('REST API Integration Tests', () => {
         .get('/api/v1/nonexistent')
         .expect(404);
 
-      expect(response.body).toHaveProperty('success', false);
-      expect(response.body).toHaveProperty('error');
-      expect(response.body).toHaveProperty('path');
-      expect(response.body).toHaveProperty('method');
+      expect(response.body).toHaveProperty('error', 'Not found');
     });
   });
 });

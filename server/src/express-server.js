@@ -99,37 +99,6 @@ class ExpressServer {
       });
     });
 
-    this.app.get('/api/v1/downloads/:requestId', validateGetDownload, (req, res) => {
-      const { requestId } = req.params;
-      const download = this.wsServer.downloadManager.getDownload(requestId);
-
-      if (!download) {
-        return res.status(404).json({
-          success: false,
-          error: 'Download not found'
-        });
-      }
-
-      res.json({
-        success: true,
-        requestId: download.id,
-        clientId: download.clientId,
-        status: download.status,
-        progress: {
-          chunksReceived: download.chunksReceived,
-          totalChunks: download.totalChunks,
-          percentage: download.totalChunks ? (download.chunksReceived / download.totalChunks * 100).toFixed(2) : 0,
-          bytesReceived: download.bytesReceived || 0,
-          retriedChunks: download.retriedChunks || []
-        },
-        retryStats: download.retryStats || {
-          totalRetries: 0,
-          retriedChunks: [],
-          retrySuccessRate: 0
-        }
-      });
-    });
-
     // GET /api/v1/downloads - List all downloads
     this.app.get('/api/v1/downloads', (req, res) => {
       const { status, clientId } = req.query;
@@ -167,13 +136,16 @@ class ExpressServer {
       });
     });
 
-    this.app.get('/api/v1/downloads/:requestId', validateGetDownload, (req, res) => {
+    this.app.get('/api/v1/downloads/:requestId', validateGetDownload, (req, res, next) => {
       try {
         const { requestId } = req.params;
         const download = this.wsServer.downloadManager.getDownload(requestId);
 
         if (!download) {
-          throw new AppError(ERROR_CODES.INVALID_REQUEST, 'Download not found');
+          return res.status(404).json({
+            success: false,
+            error: 'Download not found'
+          });
         }
       
       const response = {
@@ -218,7 +190,10 @@ class ExpressServer {
       const download = this.wsServer.downloadManager.getDownload(requestId);
 
       if (!download) {
-        throw new AppError(ERROR_CODES.INVALID_REQUEST, 'Download not found');
+        return res.status(404).json({
+          success: false,
+          error: 'Download not found'
+        });
       }
 
       // Cannot cancel completed downloads
@@ -227,9 +202,9 @@ class ExpressServer {
       }
 
       // Send CANCEL_DOWNLOAD message to client
-      const client = this.wsServer.clients.get(download.clientId);
-      if (client && client.readyState === 1) { // WebSocket.OPEN
-        client.send(JSON.stringify({
+      const client = this.wsServer.findClientByRegisteredId(download.clientId);
+      if (client && client.ws && client.ws.readyState === 1) { // WebSocket.OPEN
+        client.ws.send(JSON.stringify({
           type: 'CANCEL_DOWNLOAD',
           requestId: requestId
         }));

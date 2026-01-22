@@ -36,7 +36,7 @@ describe('Request Validation', () => {
       const validUuid = '550e8400-e29b-41d4-a716-446655440000';
       const response = await request(app)
         .get(`/api/v1/downloads/${validUuid}`)
-        .expect(404); // 404 because download doesn't exist, but validation passed
+        .expect(404); // 404 because download not found
 
       expect(response.body).toEqual({
         success: false,
@@ -68,7 +68,7 @@ describe('Request Validation', () => {
       const validUuid = '550e8400-e29b-41d4-a716-446655440000';
       const response = await request(app)
         .delete(`/api/v1/downloads/${validUuid}`)
-        .expect(404); // 404 because download doesn't exist, but validation passed
+        .expect(404); // 404 because download not found
 
       expect(response.body).toEqual({
         success: false,

@@ -1,3 +1,9 @@
+// Set test environment ports to avoid conflicts
+process.env.WS_PORT = '0'; // Use random available port
+
+// Clear config cache to ensure environment variables are picked up
+delete require.cache[require.resolve('./config')];
+
 const WebSocket = require('ws');
 const WebSocketServer = require('./websocket-server');
 const config = require('./config');
@@ -8,18 +14,20 @@ describe('WebSocket Server', () => {
   let wsUrl;
 
   beforeAll(async () => {
-    // Use a different port for testing
-    config.WS_PORT = 8081;
+    // Use a different port for testing to avoid conflicts
     server = new WebSocketServer();
-    server.start();
-    wsUrl = `ws://localhost:${config.WS_PORT}`;
+    await server.start();
     
-    // Wait for server to start
-    await new Promise(resolve => setTimeout(resolve, 100));
+    // Get the actual port the server is listening on
+    const address = server.wss.address();
+    const port = address.port;
+    wsUrl = `ws://localhost:${port}`;
   });
 
-  afterAll(() => {
-    server.stop();
+  afterAll(async () => {
+    if (server) {
+      await server.stop();
+    }
   });
 
   test('server starts and accepts connections', (done) => {
@@ -69,26 +77,48 @@ describe('WebSocket Server', () => {
   test('handles ping/pong', (done) => {
     const ws = new WebSocket(wsUrl);
     let pongReceived = false;
+    let timeoutId;
+
+    // Set a timeout to fail the test if it takes too long
+    timeoutId = setTimeout(() => {
+      ws.close();
+      done(new Error('Test timed out waiting for PONG message'));
+    }, 5000); // 5 second timeout
 
     ws.on('open', () => {
-      ws.send(JSON.stringify({ type: 'PING' }));
+      // Wait a bit for connection to be fully established
+      setTimeout(() => {
+        ws.send(JSON.stringify({ 
+          type: 'PING',
+          timestamp: new Date().toISOString()
+        }));
+      }, 100);
     });
 
     ws.on('message', (data) => {
-      const message = JSON.parse(data.toString());
-      if (message.type === 'PONG') {
-        pongReceived = true;
-        ws.close();
+      try {
+        const message = JSON.parse(data.toString());
+        if (message.type === 'PONG') {
+          pongReceived = true;
+          clearTimeout(timeoutId);
+          ws.close();
+        }
+      } catch (e) {
+        // Ignore errors parsing non-JSON messages
       }
     });
 
     ws.on('close', () => {
+      clearTimeout(timeoutId);
       if (pongReceived) {
         done();
+      } else {
+        done(new Error('Connection closed without receiving PONG'));
       }
     });
 
     ws.on('error', (error) => {
+      clearTimeout(timeoutId);
       done(error);
     });
   });

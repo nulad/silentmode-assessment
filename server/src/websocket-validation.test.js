@@ -18,7 +18,9 @@ describe('WebSocket Message Validation', () => {
   afterAll(async () => {
     if (client1) client1.close();
     if (client2) client2.close();
-    if (wsServer.wss) wsServer.wss.close();
+    if (wsServer) {
+      wsServer.stop();
+    }
   });
 
   beforeEach(async () => {
@@ -51,8 +53,8 @@ describe('WebSocket Message Validation', () => {
     client1.on('message', (data) => {
       const message = JSON.parse(data);
       if (message.type === 'ERROR') {
-        expect(message.errorCode).toBe('INVALID_REQUEST');
-        expect(message.errorMessage).toContain('ClientId must be alphanumeric');
+        expect(message.code).toBe('INVALID_REQUEST');
+        expect(message.message).toContain('ClientId must be alphanumeric');
         done();
       }
     });
@@ -69,8 +71,8 @@ describe('WebSocket Message Validation', () => {
     client1.on('message', (data) => {
       const message = JSON.parse(data);
       if (message.type === 'ERROR') {
-        expect(message.errorCode).toBe('INVALID_REQUEST');
-        expect(message.errorMessage).toContain('FilePath must be an absolute path');
+        expect(message.code).toBe('INVALID_REQUEST');
+        expect(message.message).toContain('FilePath must be an absolute path');
         done();
       }
     });
@@ -87,8 +89,8 @@ describe('WebSocket Message Validation', () => {
     client1.on('message', (data) => {
       const message = JSON.parse(data);
       if (message.type === 'ERROR') {
-        expect(message.errorCode).toBe('INVALID_REQUEST');
-        expect(message.errorMessage).toContain('without directory traversal');
+        expect(message.code).toBe('INVALID_REQUEST');
+        expect(message.message).toContain('without directory traversal');
         done();
       }
     });
@@ -105,8 +107,8 @@ describe('WebSocket Message Validation', () => {
     client1.on('message', (data) => {
       const message = JSON.parse(data);
       if (message.type === 'ERROR') {
-        expect(message.errorCode).toBe('INVALID_REQUEST');
-        expect(message.errorMessage).toContain('RequestId must be a valid UUID');
+        expect(message.code).toBe('INVALID_REQUEST');
+        expect(message.message).toContain('RequestId must be a valid UUID');
         done();
       }
     });
@@ -120,54 +122,76 @@ describe('WebSocket Message Validation', () => {
   });
 
   it('should accept valid DOWNLOAD_REQUEST', (done) => {
-    let messageCount = 0;
-    
-    client1.on('message', (data) => {
-      const message = JSON.parse(data);
-      messageCount++;
-      
-      // Should not receive an error
-      if (message.type === 'ERROR') {
-        done(new Error('Should not have received an error'));
-      }
-      
-      // Give some time for potential error to arrive
-      if (messageCount === 1) {
-        setTimeout(() => done(), 100);
-      }
-    });
-
+    // Register client1 first
     client1.send(JSON.stringify({
-      type: 'DOWNLOAD_REQUEST',
-      clientId: 'test-client-123', // Valid: alphanumeric and hyphens
-      filePath: '/valid/path/file.txt', // Valid: absolute path
-      requestId: '550e8400-e29b-41d4-a716-446655440000' // Valid: UUID v4
+      type: 'REGISTER',
+      clientId: 'test-client-456'
     }));
-  });
+    
+    // Wait for registration
+    setTimeout(() => {
+      let messageCount = 0;
+      
+      client1.on('message', (data) => {
+        const message = JSON.parse(data);
+        messageCount++;
+        
+        // Should not receive an error
+        if (message.type === 'ERROR') {
+          done(new Error('Should not have received an error'));
+          return;
+        }
+        
+        // We expect REGISTER_ACK and then DOWNLOAD_REQUEST
+        if (message.type === 'DOWNLOAD_REQUEST') {
+          // This is the forwarded request to the client itself
+          setTimeout(() => done(), 100);
+        }
+      });
+
+      client1.send(JSON.stringify({
+        type: 'DOWNLOAD_REQUEST',
+        clientId: 'test-client-456', // Use the registered ID
+        filePath: '/valid/path/file.txt', // Valid: absolute path
+        requestId: '550e8400-e29b-41d4-a716-446655440000' // Valid: UUID v4
+      }));
+    }, 50);
+  }, 10000);
 
   it('should accept DOWNLOAD_REQUEST without requestId (will auto-generate)', (done) => {
-    let messageCount = 0;
-    
-    client1.on('message', (data) => {
-      const message = JSON.parse(data);
-      messageCount++;
-      
-      // Should not receive an error
-      if (message.type === 'ERROR') {
-        done(new Error('Should not have received an error'));
-      }
-      
-      // Give some time for potential error to arrive
-      if (messageCount === 1) {
-        setTimeout(() => done(), 100);
-      }
-    });
-
+    // Register client1 first
     client1.send(JSON.stringify({
-      type: 'DOWNLOAD_REQUEST',
-      clientId: 'test-client-123', // Valid
-      filePath: '/valid/path/file.txt' // Valid
-      // No requestId provided
+      type: 'REGISTER',
+      clientId: 'test-client-789'
     }));
-  });
+    
+    // Wait for registration
+    setTimeout(() => {
+      let messageCount = 0;
+      
+      client1.on('message', (data) => {
+        const message = JSON.parse(data);
+        messageCount++;
+        
+        // Should not receive an error
+        if (message.type === 'ERROR') {
+          done(new Error('Should not have received an error'));
+          return;
+        }
+        
+        // We expect REGISTER_ACK and then DOWNLOAD_REQUEST
+        if (message.type === 'DOWNLOAD_REQUEST') {
+          // This is the forwarded request to the client itself
+          setTimeout(() => done(), 100);
+        }
+      });
+
+      client1.send(JSON.stringify({
+        type: 'DOWNLOAD_REQUEST',
+        clientId: 'test-client-789', // Use the registered ID
+        filePath: '/valid/path/file.txt' // Valid
+        // No requestId provided
+      }));
+    }, 50);
+  }, 10000);
 });

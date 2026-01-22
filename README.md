@@ -328,31 +328,7 @@ node server/cli.js health
 
 ## Configuration
 
-### Environment Variables
-
-Create a `.env` file in the root directory:
-
-```env
-# Server Configuration
-PORT=3000
-WS_PORT=8080
-SERVER_URL=http://localhost:3000
-LOG_LEVEL=info
-
-# Client Configuration
-CLIENT_ID=test-client-123
-CLIENT_NAME=Test Client
-SERVER_WS_URL=ws://localhost:8080
-RECONNECT_INTERVAL=5000
-MAX_RECONNECT_ATTEMPTS=10
-HEARTBEAT_INTERVAL=30000
-
-# Download Configuration
-CHUNK_SIZE=1048576
-MAX_CHUNK_RETRY_ATTEMPTS=3
-CHUNK_RETRY_DELAY=1000
-DOWNLOAD_TIMEOUT=300000
-```
+Both server and client have their own `.env` files in their respective directories. They do **not** read from a root `.env` file.
 
 ### Server Configuration
 
@@ -363,7 +339,14 @@ PORT=3000
 WS_PORT=8080
 DOWNLOAD_DIR=./downloads
 LOG_LEVEL=info
+CHUNK_SIZE=1048576
+MAX_CHUNK_RETRY_ATTEMPTS=3
+CHUNK_RETRY_DELAY=1000
+HEARTBEAT_INTERVAL=30000
+DOWNLOAD_TIMEOUT=300000
 ```
+
+See `server/.env.example` for all available options.
 
 ### Client Configuration
 
@@ -371,9 +354,14 @@ Create `client/.env`:
 
 ```env
 CLIENT_ID=my-client
-CLIENT_NAME=My Client
 SERVER_WS_URL=ws://localhost:8080
+LOG_LEVEL=info
+RECONNECT_INTERVAL=5000
+MAX_RECONNECT_ATTEMPTS=10
+HEARTBEAT_INTERVAL=30000
 ```
+
+See `client/.env.example` for all available options.
 
 ## Testing
 
@@ -382,10 +370,6 @@ SERVER_WS_URL=ws://localhost:8080
 ```bash
 # Run server tests
 cd server
-npm test
-
-# Run client tests (if available)
-cd client
 npm test
 ```
 

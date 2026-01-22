@@ -19,6 +19,11 @@ describe('ChunkManager - Timeout Detection', () => {
     });
   });
 
+  afterAll(async () => {
+    // Wait for any remaining timeouts to clear
+    await new Promise(resolve => setTimeout(resolve, 100));
+  });
+
   describe('Timeout Initialization', () => {
     test('should start timeout for first chunk on init', () => {
       const requestId = 'test-request-1';
