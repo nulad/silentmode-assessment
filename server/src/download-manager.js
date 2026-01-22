@@ -183,6 +183,13 @@ class DownloadManager {
       
       // Mark chunk as received in chunk manager (updates retry tracking if needed)
       markChunkReceived(requestId, chunk.chunkIndex, this);
+      
+      // Update retry tracking to mark as succeeded if this chunk was previously retried
+      const retryEntry = download.retriedChunks.find(r => r.chunkIndex === chunk.chunkIndex);
+      if (retryEntry) {
+        retryEntry.status = 'succeeded';
+        retryEntry.lastRetryAt = new Date();
+      }
 
       // Step 5: Update download progress
       this.updateDownload(requestId, {
@@ -541,7 +548,7 @@ class DownloadManager {
         lastRetryAt: new Date()
       });
       
-      // Increment total retries counter only on first retry
+      // Increment total retries counter for each attempt after the first
       if (attempt > 1) {
         download.totalRetries++;
       }
