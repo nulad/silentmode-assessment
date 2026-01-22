@@ -4,6 +4,7 @@ const path = require('path');
 const logger = require('./utils/logger');
 const { MESSAGE_TYPES } = require('../../shared/protocol');
 const { verifyChecksum, calculateChecksum } = require('./utils/checksum');
+const { initChunkTracking, markChunkReceived, markChunkFailed } = require('./chunk-manager');
 
 /**
  * Download Manager tracks active downloads and their states
@@ -47,6 +48,8 @@ class DownloadManager {
       progress: 0,
       receivedChunkIndices: new Set(), // Track which chunks have been received
       failedChunks: new Map(), // Track failed chunks: chunkIndex -> error
+      retriedChunks: [], // Track retry statistics as specified in requirements
+      totalRetries: 0, // Track total number of retry attempts
       tempFilePath: path.join(this.tempDir, id),
       tempFileHandle: null
     });
@@ -106,6 +109,9 @@ class DownloadManager {
       // Client has the file and is ready to send
       logger.info(`DOWNLOAD_ACK success for ${requestId}: ${ack.fileSize} bytes, ${ack.totalChunks} chunks`);
       
+      // Initialize chunk tracking
+      initChunkTracking(requestId, ack.totalChunks);
+      
       this.updateDownload(requestId, {
         status: 'in_progress',
         fileSize: ack.fileSize,
@@ -148,11 +154,18 @@ class DownloadManager {
         const error = `Checksum validation failed for chunk ${chunk.chunkIndex}`;
         logger.error(error);
 
+        const attempts = (download.failedChunks.get(chunk.chunkIndex)?.attempts || 0) + 1;
         download.failedChunks.set(chunk.chunkIndex, {
           error: error,
           timestamp: new Date(),
-          attempts: (download.failedChunks.get(chunk.chunkIndex)?.attempts || 0) + 1
+          attempts: attempts
         });
+
+        // Update retry tracking with proper status and reason
+        this.updateRetryTracking(requestId, chunk.chunkIndex, attempts, 'failed', 'CHECKSUM_FAILED');
+        
+        // Also mark as failed in chunk manager
+        markChunkFailed(requestId, chunk.chunkIndex, 'CHECKSUM_FAILED');
 
         return {
           success: false,
@@ -167,6 +180,9 @@ class DownloadManager {
 
       // Step 4: Track received chunk
       download.receivedChunkIndices.add(chunk.chunkIndex);
+      
+      // Mark chunk as received in chunk manager (updates retry tracking if needed)
+      markChunkReceived(requestId, chunk.chunkIndex, this);
 
       // Step 5: Update download progress
       this.updateDownload(requestId, {
@@ -183,11 +199,18 @@ class DownloadManager {
     } catch (error) {
       logger.error(`Error processing chunk ${chunk.chunkIndex} for ${requestId}:`, error);
 
+      const attempts = (download.failedChunks.get(chunk.chunkIndex)?.attempts || 0) + 1;
       download.failedChunks.set(chunk.chunkIndex, {
         error: error.message,
         timestamp: new Date(),
-        attempts: (download.failedChunks.get(chunk.chunkIndex)?.attempts || 0) + 1
+        attempts: attempts
       });
+
+      // Update retry tracking with proper status and reason
+      this.updateRetryTracking(requestId, chunk.chunkIndex, attempts, 'failed', error.message);
+      
+      // Also mark as failed in chunk manager
+      markChunkFailed(requestId, chunk.chunkIndex, error.message);
 
       return {
         success: false,
@@ -489,23 +512,51 @@ class DownloadManager {
    * @param {string} requestId - Request ID
    * @param {number} chunkIndex - Chunk index
    * @param {number} attempt - Current attempt number
+   * @param {string} status - Current status ('pending', 'succeeded', 'failed')
+   * @param {string} reason - Reason for retry/failure
    */
-  updateRetryTracking(requestId, chunkIndex, attempt) {
+  updateRetryTracking(requestId, chunkIndex, attempt, status = 'pending', reason = null) {
     const download = this.downloads.get(requestId);
     if (!download) {
       logger.warn(`Cannot update retry tracking: download ${requestId} not found`);
       return;
     }
 
+    // Find existing retry entry for this chunk
+    const existingEntry = download.retriedChunks.find(r => r.chunkIndex === chunkIndex);
+    
+    if (existingEntry) {
+      // Update existing entry
+      existingEntry.attempts = attempt;
+      existingEntry.status = status;
+      existingEntry.reason = reason || existingEntry.reason;
+      existingEntry.lastRetryAt = new Date();
+    } else {
+      // Add new retry entry
+      download.retriedChunks.push({
+        chunkIndex,
+        attempts: attempt,
+        status,
+        reason: reason || 'RETRY_REQUESTED',
+        lastRetryAt: new Date()
+      });
+      
+      // Increment total retries counter only on first retry
+      if (attempt > 1) {
+        download.totalRetries++;
+      }
+    }
+
+    // Also update failedChunks for backward compatibility
     const existingFailure = download.failedChunks.get(chunkIndex);
     download.failedChunks.set(chunkIndex, {
-      error: existingFailure?.error || 'Retry requested',
+      error: reason || existingFailure?.error || 'Retry requested',
       timestamp: new Date(),
       attempts: attempt,
       lastRetryAt: new Date()
     });
 
-    logger.debug(`Updated retry tracking for request ${requestId}, chunk ${chunkIndex}, attempt ${attempt}`);
+    logger.debug(`Updated retry tracking for request ${requestId}, chunk ${chunkIndex}, attempt ${attempt}, status ${status}`);
   }
 
   /**
