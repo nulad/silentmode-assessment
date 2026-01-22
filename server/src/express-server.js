@@ -4,6 +4,7 @@ const helmet = require('helmet');
 const logger = require('./utils/logger');
 const config = require('./config');
 const packageJson = require('../package.json');
+const { errorHandler, asyncHandler, createError, ERROR_CODES } = require('./middleware/error-handler');
 
 class ExpressServer {
   constructor(wsServer) {
@@ -27,6 +28,14 @@ class ExpressServer {
     });
   }
 
+  /**
+   * Helper method to send error responses consistently
+   */
+  sendError(res, code, message, details = {}) {
+    const error = createError(code, message, details);
+    errorHandler(error, {}, res, () => {});
+  }
+
   setupRoutes() {
     this.app.get('/api/v1/health', (req, res) => {
       const uptime = Math.floor((Date.now() - this.startTime) / 1000);
@@ -44,15 +53,12 @@ class ExpressServer {
       });
     });
 
-    this.app.get('/api/v1/downloads/:requestId', (req, res) => {
+    this.app.get('/api/v1/downloads/:requestId', asyncHandler(async (req, res) => {
       const { requestId } = req.params;
       const download = this.wsServer.downloadManager.getDownload(requestId);
       
       if (!download) {
-        return res.status(404).json({
-          success: false,
-          error: 'Download not found'
-        });
+        return this.sendError(res, ERROR_CODES.FILE_NOT_FOUND, 'Download not found');
       }
       
       const response = {
@@ -87,65 +93,50 @@ class ExpressServer {
       }
       
       res.json(response);
-    });
+    }));
 
-    this.app.delete('/api/v1/downloads/:requestId', async (req, res) => {
+    this.app.delete('/api/v1/downloads/:requestId', asyncHandler(async (req, res) => {
       const { requestId } = req.params;
       const download = this.wsServer.downloadManager.getDownload(requestId);
       
       if (!download) {
-        return res.status(404).json({
-          success: false,
-          error: 'Download not found'
-        });
+        return this.sendError(res, ERROR_CODES.FILE_NOT_FOUND, 'Download not found');
       }
       
       // Cannot cancel completed downloads
       if (download.status === 'completed' || download.status === 'failed') {
-        return res.status(409).json({
-          success: false,
-          error: 'Cannot cancel completed download'
-        });
+        return this.sendError(res, ERROR_CODES.DOWNLOAD_IN_PROGRESS, 'Cannot cancel completed download');
       }
       
-      try {
-        // Send CANCEL_DOWNLOAD message to client
-        const client = this.wsServer.clients.get(download.clientId);
-        if (client && client.readyState === 1) { // WebSocket.OPEN
-          client.send(JSON.stringify({
-            type: 'CANCEL_DOWNLOAD',
-            requestId: requestId
-          }));
-          logger.info(`Sent CANCEL_DOWNLOAD to client ${download.clientId} for request ${requestId}`);
-        }
-        
-        // Update download status to cancelled
-        await this.wsServer.downloadManager.cancelDownload(requestId, 'Cancelled by user request');
-        
-        // Clean up temp files
-        if (download.tempFilePath && require('fs').existsSync(download.tempFilePath)) {
-          try {
-            await require('fs').promises.unlink(download.tempFilePath);
-            logger.info(`Cleaned up temp file for cancelled download ${requestId}`);
-          } catch (cleanupError) {
-            logger.error(`Error cleaning up temp file for ${requestId}:`, cleanupError);
-          }
-        }
-        
-        res.json({
-          success: true,
-          requestId: requestId,
-          status: 'cancelled'
-        });
-        
-      } catch (error) {
-        logger.error(`Error cancelling download ${requestId}:`, error);
-        res.status(500).json({
-          success: false,
-          error: 'Failed to cancel download'
-        });
+      // Send CANCEL_DOWNLOAD message to client
+      const client = this.wsServer.clients.get(download.clientId);
+      if (client && client.readyState === 1) { // WebSocket.OPEN
+        client.send(JSON.stringify({
+          type: 'CANCEL_DOWNLOAD',
+          requestId: requestId
+        }));
+        logger.info(`Sent CANCEL_DOWNLOAD to client ${download.clientId} for request ${requestId}`);
       }
-    });
+      
+      // Update download status to cancelled
+      await this.wsServer.downloadManager.cancelDownload(requestId, 'Cancelled by user request');
+      
+      // Clean up temp files
+      if (download.tempFilePath && require('fs').existsSync(download.tempFilePath)) {
+        try {
+          await require('fs').promises.unlink(download.tempFilePath);
+          logger.info(`Cleaned up temp file for cancelled download ${requestId}`);
+        } catch (cleanupError) {
+          logger.error(`Error cleaning up temp file for ${requestId}:`, cleanupError);
+        }
+      }
+      
+      res.json({
+        success: true,
+        requestId: requestId,
+        status: 'cancelled'
+      });
+    }));
 
     this.app.get('/api/v1/clients', (req, res) => {
       const statusFilter = req.query.status;
@@ -174,14 +165,16 @@ class ExpressServer {
       });
     });
 
+    // 404 handler - must be before error handler
     this.app.use((req, res) => {
-      res.status(404).json({ error: 'Not found' });
+      this.sendError(res, ERROR_CODES.FILE_NOT_FOUND, 'Endpoint not found', {
+        method: req.method,
+        path: req.path
+      });
     });
 
-    this.app.use((err, req, res, next) => {
-      logger.error('Express error:', err);
-      res.status(500).json({ error: 'Internal server error' });
-    });
+    // Global error handler - must be last
+    this.app.use(errorHandler);
   }
 
   start() {
