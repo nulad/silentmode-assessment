@@ -5,6 +5,9 @@ const logger = require('./utils/logger');
 const config = require('./config');
 const packageJson = require('../package.json');
 const { validateGetDownload, validateDeleteDownload } = require('./validation');
+const { v4: uuidv4 } = require('uuid');
+const { AppError, errorMiddleware, asyncHandler } = require('./utils/error-handler');
+const { ERROR_CODES } = require('../../shared/protocol');
 
 class ExpressServer {
   constructor(wsServer) {
@@ -29,6 +32,57 @@ class ExpressServer {
   }
 
   setupRoutes() {
+    this.app.post('/api/v1/downloads', async (req, res) => {
+      const { clientId, filePath, outputPath, timeout } = req.body;
+      
+      if (!clientId || !filePath) {
+        return res.status(400).json({
+          success: false,
+          error: 'clientId and filePath are required'
+        });
+      }
+      
+      // Check if client is connected
+      logger.debug(`Looking for client: ${clientId}`);
+      const client = this.wsServer.findClientByRegisteredId(clientId);
+      if (!client) {
+        logger.warn(`Client not found: ${clientId}`);
+        return res.status(404).json({
+          success: false,
+          error: 'Client not connected'
+        });
+      }
+      logger.debug(`Client found: ${client.registeredId}`);
+      
+      try {
+        // Create download request
+        const requestId = this.wsServer.downloadManager.createDownload(clientId, filePath, null, null);
+        
+        // Send DOWNLOAD_REQUEST to client
+        this.wsServer.sendToClient(clientId, {
+          type: 'DOWNLOAD_REQUEST',
+          requestId,
+          filePath,
+          outputPath: outputPath || null,
+          timeout: timeout || 30000
+        });
+        
+        logger.info(`Initiated download ${requestId} for client ${clientId}, file: ${filePath}`);
+        
+        res.status(202).json({
+          success: true,
+          requestId,
+          status: 'pending'
+        });
+      } catch (error) {
+        logger.error('Error initiating download:', error);
+        res.status(500).json({
+          success: false,
+          error: 'Failed to initiate download'
+        });
+      }
+    });
+
     this.app.get('/api/v1/health', (req, res) => {
       const uptime = Math.floor((Date.now() - this.startTime) / 1000);
       const connectedClients = this.wsServer.clients.size;
@@ -52,9 +106,96 @@ class ExpressServer {
       if (!download) {
         return res.status(404).json({
           success: false,
-          error: 'Download not found'
+          error: 'Client not found or not connected'
         });
       }
+
+      // Generate request ID
+      const requestId = uuidv4();
+
+      try {
+        // Create download request
+        const downloadRequest = {
+          type: 'DOWNLOAD_REQUEST',
+          requestId,
+          url,
+          filename,
+          chunks: chunks || 0, // 0 means let client decide
+          timestamp: new Date().toISOString()
+        };
+
+        // Send request to client
+        client.send(JSON.stringify(downloadRequest));
+        logger.info(`Sent download request ${requestId} to client ${clientId}`);
+
+        // Initialize download in download manager
+        this.wsServer.downloadManager.createDownload(requestId, clientId, {
+          url,
+          filename,
+          totalChunks: chunks
+        });
+
+        res.status(202).json({
+          success: true,
+          requestId,
+          status: 'pending',
+          message: 'Download request sent to client'
+        });
+
+      } catch (error) {
+        logger.error('Error initiating download:', error);
+        res.status(500).json({
+          success: false,
+          error: 'Failed to initiate download'
+        });
+      }
+    });
+
+    // GET /api/v1/downloads - List all downloads
+    this.app.get('/api/v1/downloads', (req, res) => {
+      const { status, clientId } = req.query;
+
+      let downloads = Array.from(this.wsServer.downloadManager.downloads.values());
+
+      // Apply filters
+      if (status) {
+        downloads = downloads.filter(d => d.status === status);
+      }
+
+      if (clientId) {
+        downloads = downloads.filter(d => d.clientId === clientId);
+      }
+
+      const downloadList = downloads.map(download => ({
+        requestId: download.id,
+        clientId: download.clientId,
+        status: download.status,
+        progress: {
+          chunksReceived: download.chunksReceived,
+          totalChunks: download.totalChunks,
+          percentage: download.progress
+        },
+        startedAt: download.createdAt.toISOString(),
+        completedAt: download.completedAt?.toISOString(),
+        url: download.url,
+        filename: download.filename
+      }));
+
+      res.json({
+        success: true,
+        downloads: downloadList,
+        total: downloadList.length
+      });
+    });
+
+    this.app.get('/api/v1/downloads/:requestId', validateGetDownload, (req, res) => {
+      try {
+        const { requestId } = req.params;
+        const download = this.wsServer.downloadManager.getDownload(requestId);
+
+        if (!download) {
+          throw new AppError(ERROR_CODES.INVALID_REQUEST, 'Download not found');
+        }
       
       const response = {
         success: true,
@@ -66,12 +207,14 @@ class ExpressServer {
           totalChunks: download.totalChunks,
           percentage: download.progress,
           bytesReceived: download.chunksReceived * 1048576, // 1MB per chunk
-          retriedChunks: Array.from(download.failedChunks.entries()).map(([index, info]) => ({
-            chunkIndex: index,
-            attempts: info.attempts || 1,
-            lastRetryAt: info.lastRetryAt,
-            error: info.error
-          }))
+          retriedChunks: download.retriedChunks || []
+        },
+        retryStats: {
+          totalRetries: download.totalRetries || 0,
+          retriedChunks: download.retriedChunks || [],
+          retrySuccessRate: download.retriedChunks && download.retriedChunks.length > 0 
+            ? download.retriedChunks.filter(r => r.status === 'succeeded').length / download.retriedChunks.length 
+            : 0
         },
         startedAt: download.createdAt.toISOString()
       };
@@ -84,64 +227,122 @@ class ExpressServer {
       if (download.error) {
         response.error = download.error;
       }
-      
+
       res.json(response);
+      } catch (error) {
+        next(error);
+      }
     });
 
     this.app.delete('/api/v1/downloads/:requestId', validateDeleteDownload, async (req, res) => {
       const { requestId } = req.params;
       const download = this.wsServer.downloadManager.getDownload(requestId);
-      
+
       if (!download) {
-        return res.status(404).json({
-          success: false,
-          error: 'Download not found'
-        });
+        throw new AppError(ERROR_CODES.INVALID_REQUEST, 'Download not found');
       }
-      
+
       // Cannot cancel completed downloads
       if (download.status === 'completed' || download.status === 'failed') {
-        return res.status(409).json({
+        throw new AppError(ERROR_CODES.INVALID_REQUEST, 'Cannot cancel completed download');
+      }
+      
+      // Send CANCEL_DOWNLOAD message to client
+      const client = this.wsServer.clients.get(download.clientId);
+      if (client && client.readyState === 1) { // WebSocket.OPEN
+        client.send(JSON.stringify({
+          type: 'CANCEL_DOWNLOAD',
+          requestId: requestId
+        }));
+        logger.info(`Sent CANCEL_DOWNLOAD to client ${download.clientId} for request ${requestId}`);
+      }
+
+      // Update download status to cancelled
+      await this.wsServer.downloadManager.cancelDownload(requestId, 'Cancelled by user request');
+
+      // Clean up temp files
+      if (download.tempFilePath && require('fs').existsSync(download.tempFilePath)) {
+        try {
+          await require('fs').promises.unlink(download.tempFilePath);
+          logger.info(`Cleaned up temp file for cancelled download ${requestId}`);
+        } catch (cleanupError) {
+          logger.error(`Error cleaning up temp file for ${requestId}:`, cleanupError);
+        }
+      }
+
+      res.json({
+        success: true,
+        requestId: requestId,
+        status: 'cancelled'
+      });
+    }));
+
+    this.app.post('/api/v1/downloads', async (req, res) => {
+      const { clientId, filePath, output, timeout = 30000 } = req.body;
+      
+      if (!clientId || !filePath) {
+        return res.status(400).json({
           success: false,
-          error: 'Cannot cancel completed download'
+          error: 'clientId and filePath are required'
         });
       }
       
       try {
-        // Send CANCEL_DOWNLOAD message to client
-        const client = this.wsServer.clients.get(download.clientId);
-        if (client && client.readyState === 1) { // WebSocket.OPEN
-          client.send(JSON.stringify({
-            type: 'CANCEL_DOWNLOAD',
-            requestId: requestId
-          }));
-          logger.info(`Sent CANCEL_DOWNLOAD to client ${download.clientId} for request ${requestId}`);
-        }
+        // Generate a unique request ID
+        const requestId = `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
         
-        // Update download status to cancelled
-        await this.wsServer.downloadManager.cancelDownload(requestId, 'Cancelled by user request');
+        // Create download in manager
+        this.wsServer.downloadManager.createDownload(clientId, filePath, requestId, 'cli');
         
-        // Clean up temp files
-        if (download.tempFilePath && require('fs').existsSync(download.tempFilePath)) {
-          try {
-            await require('fs').promises.unlink(download.tempFilePath);
-            logger.info(`Cleaned up temp file for cancelled download ${requestId}`);
-          } catch (cleanupError) {
-            logger.error(`Error cleaning up temp file for ${requestId}:`, cleanupError);
+        // Find the target client
+        let targetClientId = null;
+        for (const [cid, client] of this.wsServer.clients.entries()) {
+          if (client.registeredId === clientId) {
+            targetClientId = cid;
+            break;
           }
         }
+        
+        if (!targetClientId) {
+          logger.error(`Target client ${clientId} not found`);
+          this.wsServer.downloadManager.failDownload(requestId, new Error('Client not found'));
+          return res.status(404).json({
+            success: false,
+            error: 'Client not found'
+          });
+        }
+        
+        // Send DOWNLOAD_REQUEST to target client
+        const success = this.wsServer.sendToClient(targetClientId, {
+          type: 'DOWNLOAD_REQUEST',
+          requestId: requestId,
+          clientId: clientId,
+          filePath: filePath
+        });
+        
+        if (!success) {
+          logger.error(`Failed to send DOWNLOAD_REQUEST to client ${clientId}`);
+          this.wsServer.downloadManager.failDownload(requestId, new Error('Failed to contact client'));
+          return res.status(500).json({
+            success: false,
+            error: 'Failed to contact client'
+          });
+        }
+        
+        logger.info(`Download request ${requestId} sent to client ${clientId} for file: ${filePath}`);
         
         res.json({
           success: true,
           requestId: requestId,
-          status: 'cancelled'
+          status: 'pending',
+          message: 'Download request sent'
         });
         
       } catch (error) {
-        logger.error(`Error cancelling download ${requestId}:`, error);
+        logger.error(`Error creating download request:`, error);
         res.status(500).json({
           success: false,
-          error: 'Failed to cancel download'
+          error: 'Failed to create download request'
         });
       }
     });
@@ -173,14 +374,47 @@ class ExpressServer {
       });
     });
 
+    // Get specific client
+    this.app.get('/api/v1/clients/:clientId', (req, res) => {
+      const { clientId } = req.params;
+      
+      // Find the client in the WebSocket server
+      const client = Array.from(this.wsServer.clients.values()).find(c => 
+        (c.registeredId || c.id) === clientId
+      );
+      
+      if (!client) {
+        return res.status(404).json({
+          success: false,
+          error: `Client ${clientId} not found`
+        });
+      }
+      
+      const clientInfo = {
+        clientId: client.registeredId || client.id,
+        connectedAt: client.connectedAt.toISOString(),
+        lastHeartbeat: client.lastHeartbeat.toISOString(),
+        status: 'connected',
+        metadata: {}
+      };
+      
+      res.json({
+        success: true,
+        client: clientInfo
+      });
+    });
+
     this.app.use((req, res) => {
       res.status(404).json({ error: 'Not found' });
     });
 
-    this.app.use((err, req, res, next) => {
-      logger.error('Express error:', err);
-      res.status(500).json({ error: 'Internal server error' });
+    // 404 handler - must come before error middleware
+    this.app.use((req, res, next) => {
+      next(new AppError(ERROR_CODES.INVALID_REQUEST, 'Not found'));
     });
+
+    // Error handling middleware - must be last
+    this.app.use(errorMiddleware);
   }
 
   start() {
