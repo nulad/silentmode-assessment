@@ -3,12 +3,18 @@ const logger = require('./utils/logger');
 const config = require('./config');
 const { MESSAGE_TYPES, validateMessage, ERROR_CODES, RETRY_REASONS } = require('../../shared/protocol');
 const DownloadManager = require('./download-manager');
+const { chunkManager } = require('./chunk-manager');
 
 class WebSocketServer {
   constructor() {
     this.wss = null;
     this.clients = new Map();
     this.downloadManager = new DownloadManager();
+    
+    // Set up chunk manager event listeners
+    chunkManager.on('chunkTimeout', (data) => {
+      this.handleChunkTimeout(data);
+    });
   }
 
   start() {
@@ -177,6 +183,11 @@ class WebSocketServer {
     // Forward to download manager for processing
     this.downloadManager.handleDownloadAck(message.requestId, message);
     
+    // Initialize chunk tracking if download is successful
+    if (message.success) {
+      chunkManager.initChunkTracking(message.requestId, message.totalChunks);
+    }
+    
     // Forward ACK to the requester
     const download = this.downloadManager.getDownload(message.requestId);
     if (download && download.requesterClientId) {
@@ -196,15 +207,32 @@ class WebSocketServer {
     // Forward to download manager for processing
     const result = await this.downloadManager.handleFileChunk(message.requestId, message);
     
-    // If chunk failed and needs retry, send RETRY_CHUNK message
+    // If chunk was successfully received, mark it in chunk manager
+    if (result.success) {
+      try {
+        chunkManager.markChunkReceived(message.requestId, message.chunkIndex);
+      } catch (error) {
+        logger.error(`Error marking chunk as received:`, error);
+      }
+    }
+    
+    // If chunk failed and needs retry, check if we've exceeded max attempts
     if (!result.success && result.needsRetry) {
       const download = this.downloadManager.getDownload(message.requestId);
       if (download) {
-        const reason = result.error === 'CHUNK_CHECKSUM_FAILED' 
-          ? RETRY_REASONS.CHECKSUM_FAILED 
-          : RETRY_REASONS.TIMEOUT;
+        const failedChunk = download.failedChunks.get(result.chunkIndex);
+        const attempt = failedChunk ? failedChunk.attempts : 1;
         
-        this.sendRetryChunk(clientId, message.requestId, result.chunkIndex, reason);
+        // Check if we've exceeded max retry attempts
+        if (attempt >= config.MAX_CHUNK_RETRY_ATTEMPTS) {
+          await this.handleChunkFailureExhausted(message.requestId, result.chunkIndex, attempt);
+        } else {
+          const reason = result.error === 'CHUNK_CHECKSUM_FAILED' 
+            ? RETRY_REASONS.CHECKSUM_FAILED 
+            : RETRY_REASONS.TIMEOUT;
+          
+          this.sendRetryChunk(clientId, message.requestId, result.chunkIndex, reason);
+        }
       }
     }
     
@@ -231,11 +259,21 @@ class WebSocketServer {
       
       // Send RETRY_CHUNK for each missing chunk
       for (const chunkIndex of missingChunks) {
-        this.sendRetryChunk(clientId, message.requestId, chunkIndex, RETRY_REASONS.MISSING);
+        const retryAttempts = chunkManager.markChunkFailed(message.requestId, chunkIndex, 'missing');
+        
+        // Check if we've exceeded max retry attempts
+        if (retryAttempts >= config.MAX_CHUNK_RETRY_ATTEMPTS) {
+          await this.handleChunkFailureExhausted(message.requestId, chunkIndex, retryAttempts);
+        } else {
+          this.sendRetryChunk(clientId, message.requestId, chunkIndex, RETRY_REASONS.MISSING);
+        }
       }
       
       return;
     }
+    
+    // Clean up chunk tracking
+    chunkManager.cleanup(message.requestId);
     
     // Forward to download manager for processing
     await this.downloadManager.handleDownloadComplete(message.requestId, message);
@@ -244,6 +282,75 @@ class WebSocketServer {
     const download = this.downloadManager.getDownload(message.requestId);
     if (download && download.requesterClientId) {
       this.sendToClient(download.requesterClientId, message);
+    }
+  }
+
+  /**
+   * Handle chunk timeout event from chunk manager
+   * @param {Object} data - Timeout event data
+   */
+  async handleChunkTimeout(data) {
+    const { requestId, chunkIndex } = data;
+    logger.info(`Chunk ${chunkIndex} timeout for request ${requestId}`);
+    
+    // Mark chunk as failed
+    const retryAttempts = chunkManager.markChunkFailed(requestId, chunkIndex, 'timeout');
+    
+    // Check if we've exceeded max retry attempts
+    if (retryAttempts >= config.MAX_CHUNK_RETRY_ATTEMPTS) {
+      await this.handleChunkFailureExhausted(requestId, chunkIndex, retryAttempts);
+    } else {
+      // Find the client that's sending the file
+      const download = this.downloadManager.getDownload(requestId);
+      if (download) {
+        let targetClientId = null;
+        for (const [cid, client] of this.clients.entries()) {
+          if (client.registeredId === download.clientId) {
+            targetClientId = cid;
+            break;
+          }
+        }
+        
+        if (targetClientId) {
+          this.sendRetryChunk(targetClientId, requestId, chunkIndex, RETRY_REASONS.TIMEOUT);
+        }
+      }
+    }
+  }
+
+  /**
+   * Handle when a chunk has failed after max retry attempts
+   * @param {string} requestId - Request ID
+   * @param {number} chunkIndex - Failed chunk index
+   * @param {number} attempts - Number of attempts made
+   */
+  async handleChunkFailureExhausted(requestId, chunkIndex, attempts) {
+    logger.error(`Chunk ${chunkIndex} failed after ${attempts} attempts for request ${requestId}`);
+    
+    // Clean up chunk tracking
+    chunkManager.cleanup(requestId);
+    
+    // Mark download as failed
+    const error = new Error(`Chunk ${chunkIndex} failed after ${attempts} attempts`);
+    error.code = ERROR_CODES.CHUNK_TRANSFER_FAILED;
+    error.chunkIndex = chunkIndex;
+    error.attempts = attempts;
+    
+    await this.downloadManager.failDownload(requestId, error);
+    
+    // Send error to requester
+    const download = this.downloadManager.getDownload(requestId);
+    if (download && download.requesterClientId) {
+      this.sendToClient(download.requesterClientId, {
+        type: MESSAGE_TYPES.ERROR,
+        code: ERROR_CODES.CHUNK_TRANSFER_FAILED,
+        message: `Chunk ${chunkIndex} failed after ${attempts} attempts`,
+        details: {
+          chunkIndex: chunkIndex,
+          attempts: attempts
+        },
+        requestId: requestId
+      });
     }
   }
 
@@ -330,6 +437,13 @@ class WebSocketServer {
     this.sendToClient(clientId, retryMessage);
 
     this.downloadManager.updateRetryTracking(requestId, chunkIndex, attempt);
+    
+    // Also mark as failed in chunk manager for tracking
+    try {
+      chunkManager.markChunkFailed(requestId, chunkIndex, reason);
+    } catch (error) {
+      logger.error(`Error marking chunk as failed in chunk manager:`, error);
+    }
   }
 
   generateClientId() {

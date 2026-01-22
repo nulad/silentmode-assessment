@@ -406,11 +406,25 @@ class DownloadManager {
       }
     }
 
+    // Clean up temp files
+    if (download && download.tempFilePath) {
+      try {
+        if (fs.existsSync(download.tempFilePath)) {
+          await fs.promises.unlink(download.tempFilePath);
+          logger.debug(`Cleaned up temp file for failed download ${requestId}`);
+        }
+      } catch (cleanupError) {
+        logger.error(`Error cleaning up temp file for ${requestId}:`, cleanupError);
+      }
+    }
+
     this.updateDownload(requestId, {
       status: 'failed',
       error: {
         code: error.code || 'DOWNLOAD_FAILED',
-        message: error.message
+        message: error.message,
+        chunkIndex: error.chunkIndex,
+        attempts: error.attempts
       }
     });
   }
