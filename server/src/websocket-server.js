@@ -3,6 +3,7 @@ const logger = require('./utils/logger');
 const config = require('./config');
 const { MESSAGE_TYPES, validateMessage, ERROR_CODES, RETRY_REASONS } = require('../../shared/protocol');
 const DownloadManager = require('./download-manager');
+const { validate: uuidValidate } = require('uuid');
 
 class WebSocketServer {
   constructor() {
@@ -129,6 +130,27 @@ class WebSocketServer {
   }
 
   handleDownloadRequest(clientId, message) {
+    // Validate clientId
+    if (!message.clientId || typeof message.clientId !== 'string' || 
+        !/^[a-zA-Z0-9-]+$/.test(message.clientId) || 
+        message.clientId.length < 1 || message.clientId.length > 64) {
+      this.sendError(clientId, 'INVALID_REQUEST', 'ClientId must be alphanumeric with hyphens, 1-64 characters');
+      return;
+    }
+
+    // Validate filePath
+    if (!message.filePath || typeof message.filePath !== 'string' || 
+        !message.filePath.startsWith('/') || message.filePath.includes('..')) {
+      this.sendError(clientId, 'INVALID_REQUEST', 'FilePath must be an absolute path without directory traversal');
+      return;
+    }
+
+    // Validate requestId if provided
+    if (message.requestId && !uuidValidate(message.requestId)) {
+      this.sendError(clientId, 'INVALID_REQUEST', 'RequestId must be a valid UUID v4');
+      return;
+    }
+
     logger.info(`Download request initiated for client: ${message.clientId}, file: ${message.filePath}`);
     
     // Generate a unique request ID if not provided

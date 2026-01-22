@@ -4,6 +4,7 @@ const helmet = require('helmet');
 const logger = require('./utils/logger');
 const config = require('./config');
 const packageJson = require('../package.json');
+const { validateGetDownload, validateDeleteDownload } = require('./validation');
 
 class ExpressServer {
   constructor(wsServer) {
@@ -44,7 +45,7 @@ class ExpressServer {
       });
     });
 
-    this.app.get('/api/v1/downloads/:requestId', (req, res) => {
+    this.app.get('/api/v1/downloads/:requestId', validateGetDownload, (req, res) => {
       const { requestId } = req.params;
       const download = this.wsServer.downloadManager.getDownload(requestId);
       
@@ -87,7 +88,7 @@ class ExpressServer {
       res.json(response);
     });
 
-    this.app.delete('/api/v1/downloads/:requestId', async (req, res) => {
+    this.app.delete('/api/v1/downloads/:requestId', validateDeleteDownload, async (req, res) => {
       const { requestId } = req.params;
       const download = this.wsServer.downloadManager.getDownload(requestId);
       
