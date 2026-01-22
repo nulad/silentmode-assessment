@@ -1,0 +1,718 @@
+openapi: 3.0.3
+info:
+  title: Silentmode Assessment API
+  description: A robust chunk-based file download system with retry logic and WebSocket communication
+  version: 1.0.0
+  contact:
+    name: API Support
+    email: support@example.com
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: http://localhost:3000
+    description: Development server
+  - url: https://api.silentmode.example.com
+    description: Production server
+
+paths:
+  /health:
+    get:
+      tags:
+        - Health
+      summary: Check server health
+      description: Returns the current health status of the server
+      operationId: getHealth
+      responses:
+        '200':
+          description: Server is healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+              example:
+                status: healthy
+                timestamp: "2023-01-01T00:00:00.000Z"
+                uptime: 3600
+                version: "1.0.0"
+
+  /api/clients:
+    post:
+      tags:
+        - Clients
+      summary: Register a new client
+      description: Registers a new client with the server
+      operationId: registerClient
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ClientRegistration'
+            example:
+              name: "cli-client-001"
+              type: "cli"
+              version: "1.0.0"
+              capabilities: ["retry", "resume", "parallel"]
+      responses:
+        '201':
+          description: Client registered successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+              example:
+                success: true
+                data:
+                  id: "client-123456"
+                  name: "cli-client-001"
+                  type: "cli"
+                  registeredAt: "2023-01-01T00:00:00.000Z"
+                  status: "active"
+                meta:
+                  timestamp: 1640995200
+                  requestId: "req-123456"
+                  version: "1.0.0"
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+    get:
+      tags:
+        - Clients
+      summary: List all clients
+      description: Retrieves a list of all registered clients
+      operationId: listClients
+      parameters:
+        - name: type
+          in: query
+          description: Filter by client type
+          schema:
+            type: string
+            enum: [cli, web, mobile]
+        - name: status
+          in: query
+          description: Filter by status
+          schema:
+            type: string
+            enum: [active, inactive, suspended]
+        - name: limit
+          in: query
+          description: Maximum number of results
+          schema:
+            type: integer
+            default: 10
+            minimum: 1
+            maximum: 100
+        - name: offset
+          in: query
+          description: Pagination offset
+          schema:
+            type: integer
+            default: 0
+            minimum: 0
+      responses:
+        '200':
+          description: List of clients
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          clients:
+                            type: array
+                            items:
+                              $ref: '#/components/schemas/Client'
+                          total:
+                            type: integer
+                          limit:
+                            type: integer
+                          offset:
+                            type: integer
+
+  /api/clients/{id}:
+    get:
+      tags:
+        - Clients
+      summary: Get client details
+      description: Retrieves detailed information about a specific client
+      operationId: getClient
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Client ID
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Client details
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/ClientDetails'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/downloads:
+    post:
+      tags:
+        - Downloads
+      summary: Initiate a new download
+      description: Starts a new download session
+      operationId: createDownload
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DownloadRequest'
+            example:
+              filename: "example.zip"
+              size: 104857600
+              checksum: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              metadata:
+                contentType: "application/zip"
+                description: "Example file"
+      responses:
+        '201':
+          description: Download created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/DownloadSession'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+    get:
+      tags:
+        - Downloads
+      summary: List all downloads
+      description: Retrieves a list of all downloads
+      operationId: listDownloads
+      parameters:
+        - name: status
+          in: query
+          description: Filter by status
+          schema:
+            type: string
+            enum: [initiated, downloading, paused, completed, failed, cancelled]
+        - name: clientId
+          in: query
+          description: Filter by client ID
+          schema:
+            type: string
+        - name: limit
+          in: query
+          description: Maximum number of results
+          schema:
+            type: integer
+            default: 10
+            minimum: 1
+            maximum: 100
+        - name: offset
+          in: query
+          description: Pagination offset
+          schema:
+            type: integer
+            default: 0
+            minimum: 0
+      responses:
+        '200':
+          description: List of downloads
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          downloads:
+                            type: array
+                            items:
+                              $ref: '#/components/schemas/DownloadSummary'
+                          total:
+                            type: integer
+                          limit:
+                            type: integer
+                          offset:
+                            type: integer
+
+  /api/downloads/{id}:
+    get:
+      tags:
+        - Downloads
+      summary: Get download status
+      description: Retrieves detailed status of a specific download
+      operationId: getDownload
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Download ID
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Download details
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/DownloadDetails'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    delete:
+      tags:
+        - Downloads
+      summary: Cancel or delete a download
+      description: Cancels an active download or deletes a completed one
+      operationId: deleteDownload
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Download ID
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Download cancelled/deleted
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/DownloadCancellation'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/downloads/{id}/chunks:
+    get:
+      tags:
+        - Downloads
+      summary: Get download chunks status
+      description: Retrieves the status of all chunks for a download
+      operationId: getDownloadChunks
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Download ID
+          schema:
+            type: string
+        - name: status
+          in: query
+          description: Filter by chunk status
+          schema:
+            type: string
+            enum: [pending, downloading, completed, failed]
+        - name: limit
+          in: query
+          description: Maximum number of results
+          schema:
+            type: integer
+            default: 100
+      responses:
+        '200':
+          description: Chunk status list
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          chunks:
+                            type: array
+                            items:
+                              $ref: '#/components/schemas/ChunkStatus'
+                          total:
+                            type: integer
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+components:
+  schemas:
+    ApiResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        meta:
+          $ref: '#/components/schemas/ResponseMeta'
+
+    ResponseMeta:
+      type: object
+      properties:
+        timestamp:
+          type: integer
+          format: int64
+          description: Unix timestamp
+        requestId:
+          type: string
+          description: Unique request identifier
+        version:
+          type: string
+          description: API version
+
+    HealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [healthy, unhealthy, degraded]
+        timestamp:
+          type: string
+          format: date-time
+        uptime:
+          type: integer
+          description: Server uptime in seconds
+        version:
+          type: string
+
+    ClientRegistration:
+      type: object
+      required:
+        - name
+        - type
+      properties:
+        name:
+          type: string
+          description: Unique client name
+          example: "cli-client-001"
+        type:
+          type: string
+          enum: [cli, web, mobile]
+          description: Type of client
+        version:
+          type: string
+          description: Client version
+          example: "1.0.0"
+        capabilities:
+          type: array
+          items:
+            type: string
+            enum: [retry, resume, parallel, compression]
+          description: Client capabilities
+
+    Client:
+      type: object
+      properties:
+        id:
+          type: string
+          description: Client ID
+        name:
+          type: string
+          description: Client name
+        type:
+          type: string
+          enum: [cli, web, mobile]
+        status:
+          type: string
+          enum: [active, inactive, suspended]
+        lastSeen:
+          type: string
+          format: date-time
+
+    ClientDetails:
+      allOf:
+        - $ref: '#/components/schemas/Client'
+        - type: object
+          properties:
+            version:
+              type: string
+            registeredAt:
+              type: string
+              format: date-time
+            capabilities:
+              type: array
+              items:
+                type: string
+            downloads:
+              type: object
+              properties:
+                total:
+                  type: integer
+                active:
+                  type: integer
+                completed:
+                  type: integer
+
+    DownloadRequest:
+      type: object
+      required:
+        - filename
+        - size
+      properties:
+        filename:
+          type: string
+          description: Name of the file to download
+          example: "example.zip"
+        size:
+          type: integer
+          format: int64
+          description: File size in bytes
+          example: 104857600
+        checksum:
+          type: string
+          description: SHA256 checksum of the file
+          example: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        metadata:
+          type: object
+          description: Additional metadata
+          properties:
+            contentType:
+              type: string
+              example: "application/zip"
+            description:
+              type: string
+              example: "Example file"
+
+    DownloadSession:
+      type: object
+      properties:
+        id:
+          type: string
+          description: Download session ID
+        filename:
+          type: string
+        size:
+          type: integer
+          format: int64
+        status:
+          type: string
+          enum: [initiated, downloading, paused, completed, failed, cancelled]
+        createdAt:
+          type: string
+          format: date-time
+        chunkSize:
+          type: integer
+          description: Size of each chunk in bytes
+        totalChunks:
+          type: integer
+          description: Total number of chunks
+        websocketUrl:
+          type: string
+          description: WebSocket URL for chunk download
+
+    DownloadSummary:
+      type: object
+      properties:
+        id:
+          type: string
+        filename:
+          type: string
+        size:
+          type: integer
+          format: int64
+        status:
+          type: string
+          enum: [initiated, downloading, paused, completed, failed, cancelled]
+        progress:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 100
+          description: Progress percentage
+        createdAt:
+          type: string
+          format: date-time
+
+    DownloadDetails:
+      allOf:
+        - $ref: '#/components/schemas/DownloadSummary'
+        - type: object
+          properties:
+            downloadedChunks:
+              type: integer
+            totalChunks:
+              type: integer
+            downloadedBytes:
+              type: integer
+              format: int64
+            speed:
+              type: integer
+              description: Current download speed in bytes per second
+            eta:
+              type: integer
+              description: Estimated time remaining in seconds
+            startedAt:
+              type: string
+              format: date-time
+            chunks:
+              type: array
+              items:
+                $ref: '#/components/schemas/ChunkStatus'
+
+    ChunkStatus:
+      type: object
+      properties:
+        number:
+          type: integer
+          description: Chunk number (1-based)
+        status:
+          type: string
+          enum: [pending, downloading, completed, failed]
+        receivedAt:
+          type: string
+          format: date-time
+          description: When chunk was received (if completed)
+        attempts:
+          type: integer
+          description: Number of download attempts
+        lastAttempt:
+          type: string
+          format: date-time
+          description: Time of last attempt
+
+    DownloadCancellation:
+      type: object
+      properties:
+        id:
+          type: string
+        status:
+          type: string
+          enum: [cancelled, deleted]
+        cancelledAt:
+          type: string
+          format: date-time
+        reason:
+          type: string
+          enum: [user_request, timeout, error, server_shutdown]
+
+    ErrorResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: false
+        error:
+          type: object
+          properties:
+            code:
+              type: string
+              description: Error code
+            message:
+              type: string
+              description: Human-readable error message
+            details:
+              type: object
+              description: Additional error details
+        meta:
+          $ref: '#/components/schemas/ResponseMeta'
+
+  responses:
+    BadRequest:
+      description: Bad request
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            success: false
+            error:
+              code: "INVALID_REQUEST"
+              message: "The request is invalid"
+              details:
+                field: "filename"
+                reason: "Required field missing"
+
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            success: false
+            error:
+              code: "NOT_FOUND"
+              message: "The requested resource was not found"
+
+    Conflict:
+      description: Resource conflict
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            success: false
+            error:
+              code: "CONFLICT"
+              message: "Resource already exists"
+
+    TooManyRequests:
+      description: Rate limit exceeded
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            success: false
+            error:
+              code: "RATE_LIMIT_EXCEEDED"
+              message: "Too many requests"
+
+    InternalServerError:
+      description: Internal server error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            success: false
+            error:
+              code: "INTERNAL_ERROR"
+              message: "An unexpected error occurred"
+
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: API key for authentication (future implementation)
+
+security:
+  - ApiKeyAuth: []
+
+tags:
+  - name: Health
+    description: Health check endpoints
+  - name: Clients
+    description: Client management endpoints
+  - name: Downloads
+    description: Download management endpoints
