@@ -17,28 +17,32 @@ program
   .description('Download a file from a client')
   .argument('<clientId>', 'Client ID to download from')
   .option('-f, --file-path <path>', 'File path on client')
-  .option('-o, --output <path>', 'Output path on server')
+  .option('-o, --output <path>', 'Output path on server (optional)')
   .option('-t, --timeout <ms>', 'Timeout in milliseconds', '30000')
-  .option('-w, --watch', 'Watch progress in real-time')
+  .option('-w, --watch', 'Watch progress in real-time', false)
   .action(async (clientId, options) => {
-    try {
-      if (!options.filePath) {
-        console.error(chalk.red('Error: --file-path is required'));
-        process.exit(1);
-      }
+    if (!options.filePath) {
+      console.error(chalk.red('Error: --file-path is required'));
+      process.exit(1);
+    }
 
-      // Initiate download
-      const spinner = ora('Initiating download...').start();
+    const serverUrl = process.env.SERVER_URL || 'http://localhost:3001';
+    let spinner;
+
+    try {
+      // Step 1: Initiate download
+      spinner = ora('Initiating download...').start();
       
-      const response = await axios.post(`${API_BASE}/downloads`, {
+      const response = await axios.post(`${serverUrl}/api/v1/downloads`, {
         clientId,
         filePath: options.filePath,
-        outputPath: options.output || null,
+        output: options.output,
         timeout: parseInt(options.timeout)
       });
-      
+
       if (!response.data.success) {
         spinner.fail('Failed to initiate download');
+        console.error(chalk.red('Error:', response.data.error));
         console.error(chalk.red(response.data.error));
         process.exit(1);
       }
