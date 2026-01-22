@@ -3,6 +3,7 @@ const logger = require('./utils/logger');
 const config = require('./config');
 const { MESSAGE_TYPES, validateMessage, ERROR_CODES, RETRY_REASONS } = require('../../shared/protocol');
 const DownloadManager = require('./download-manager');
+const { chunkManager } = require('./chunk-manager');
 
 class WebSocketServer {
   constructor() {
@@ -27,6 +28,11 @@ class WebSocketServer {
 
     this.wss.on('error', (error) => {
       logger.error('WebSocket server error:', error);
+    });
+
+    // Listen to chunk timeout events from chunk manager
+    chunkManager.on('chunkTimeout', (data) => {
+      this.handleChunkTimeout(data);
     });
 
     return this.wss;
@@ -62,6 +68,36 @@ class WebSocketServer {
       success: true,
       message: 'Connected to SilentMode server'
     });
+  }
+
+  /**
+   * Handle chunk timeout event with exponential backoff
+   * @param {Object} data - Timeout event data { requestId, chunkIndex, totalChunks }
+   */
+  handleChunkTimeout(data) {
+    const { requestId, chunkIndex } = data;
+    
+    // Get the download to find the client ID
+    const download = this.downloadManager.getDownload(requestId);
+    if (!download) {
+      logger.error(`Cannot handle timeout: download ${requestId} not found`);
+      return;
+    }
+
+    // Get retry attempts from chunk manager
+    const retryInfo = chunkManager.getRetryInfo(requestId);
+    const failedChunk = retryInfo.failedChunks.find(c => c.chunkIndex === chunkIndex);
+    const attempt = failedChunk ? failedChunk.attempts : 1;
+
+    // Calculate exponential backoff delay
+    const delay = config.CHUNK_RETRY_DELAY * Math.pow(2, attempt - 1);
+    
+    logger.info(`Scheduling retry for request ${requestId}, chunk ${chunkIndex}, attempt ${attempt}, delay: ${delay}ms`);
+
+    // Schedule retry with exponential backoff
+    setTimeout(() => {
+      this.sendRetryChunk(download.clientId, requestId, chunkIndex, RETRY_REASONS.TIMEOUT);
+    }, delay);
   }
 
   handleMessage(clientId, data) {
@@ -177,6 +213,12 @@ class WebSocketServer {
     // Forward to download manager for processing
     this.downloadManager.handleDownloadAck(message.requestId, message);
     
+    // Initialize chunk tracking if download is in progress
+    if (message.success && message.totalChunks) {
+      chunkManager.initChunkTracking(message.requestId, message.totalChunks);
+      logger.info(`Initialized chunk tracking for request ${message.requestId} with ${message.totalChunks} chunks`);
+    }
+    
     // Forward ACK to the requester
     const download = this.downloadManager.getDownload(message.requestId);
     if (download && download.requesterClientId) {
@@ -196,6 +238,11 @@ class WebSocketServer {
     // Forward to download manager for processing
     const result = await this.downloadManager.handleFileChunk(message.requestId, message);
     
+    // Mark chunk as received in chunk manager if successful
+    if (result.success) {
+      chunkManager.markChunkReceived(message.requestId, message.chunkIndex);
+    }
+    
     // If chunk failed and needs retry, send RETRY_CHUNK message
     if (!result.success && result.needsRetry) {
       const download = this.downloadManager.getDownload(message.requestId);
@@ -204,7 +251,20 @@ class WebSocketServer {
           ? RETRY_REASONS.CHECKSUM_FAILED 
           : RETRY_REASONS.TIMEOUT;
         
-        this.sendRetryChunk(clientId, message.requestId, result.chunkIndex, reason);
+        // Mark chunk as failed in chunk manager
+        chunkManager.markChunkFailed(message.requestId, result.chunkIndex, reason);
+        
+        // Apply exponential backoff for retry
+        const retryInfo = chunkManager.getRetryInfo(message.requestId);
+        const failedChunk = retryInfo.failedChunks.find(c => c.chunkIndex === result.chunkIndex);
+        const attempt = failedChunk ? failedChunk.attempts : 1;
+        const delay = config.CHUNK_RETRY_DELAY * Math.pow(2, attempt - 1);
+        
+        logger.info(`Scheduling retry for request ${message.requestId}, chunk ${result.chunkIndex}, attempt ${attempt}, delay: ${delay}ms`);
+        
+        setTimeout(() => {
+          this.sendRetryChunk(clientId, message.requestId, result.chunkIndex, reason);
+        }, delay);
       }
     }
     
@@ -224,6 +284,9 @@ class WebSocketServer {
       return;
     }
     
+    // Clean up chunk tracking
+    chunkManager.cleanup(message.requestId);
+    
     // Check for missing chunks before processing completion
     const missingChunks = this.downloadManager.getMissingChunks(message.requestId);
     if (missingChunks.length > 0) {
@@ -231,7 +294,12 @@ class WebSocketServer {
       
       // Send RETRY_CHUNK for each missing chunk
       for (const chunkIndex of missingChunks) {
-        this.sendRetryChunk(clientId, message.requestId, chunkIndex, RETRY_REASONS.MISSING);
+        // Apply exponential backoff for missing chunks
+        const delay = config.CHUNK_RETRY_DELAY; // First attempt, no backoff yet
+        
+        setTimeout(() => {
+          this.sendRetryChunk(clientId, message.requestId, chunkIndex, RETRY_REASONS.MISSING);
+        }, delay);
       }
       
       return;
