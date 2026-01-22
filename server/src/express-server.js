@@ -4,6 +4,7 @@ const helmet = require('helmet');
 const logger = require('./utils/logger');
 const config = require('./config');
 const packageJson = require('../package.json');
+const { v4: uuidv4 } = require('uuid');
 
 class ExpressServer {
   constructor(wsServer) {
@@ -41,6 +42,121 @@ class ExpressServer {
         connectedClients,
         activeDownloads,
         version: packageJson.version
+      });
+    });
+
+    // POST /api/v1/downloads - Initiate a new download
+    this.app.post('/api/v1/downloads', (req, res) => {
+      const { url, filename, clientId, chunks } = req.body;
+      
+      // Validation
+      if (!url || typeof url !== 'string') {
+        return res.status(400).json({
+          success: false,
+          error: 'URL is required and must be a string'
+        });
+      }
+      
+      if (!filename || typeof filename !== 'string') {
+        return res.status(400).json({
+          success: false,
+          error: 'Filename is required and must be a string'
+        });
+      }
+      
+      if (!clientId || typeof clientId !== 'string') {
+        return res.status(400).json({
+          success: false,
+          error: 'Client ID is required and must be a string'
+        });
+      }
+      
+      // Check if client exists
+      const client = Array.from(this.wsServer.clients.values())
+        .find(c => (c.registeredId || c.id) === clientId);
+      
+      if (!client) {
+        return res.status(404).json({
+          success: false,
+          error: 'Client not found or not connected'
+        });
+      }
+      
+      // Generate request ID
+      const requestId = uuidv4();
+      
+      try {
+        // Create download request
+        const downloadRequest = {
+          type: 'DOWNLOAD_REQUEST',
+          requestId,
+          url,
+          filename,
+          chunks: chunks || 0, // 0 means let client decide
+          timestamp: new Date().toISOString()
+        };
+        
+        // Send request to client
+        client.send(JSON.stringify(downloadRequest));
+        logger.info(`Sent download request ${requestId} to client ${clientId}`);
+        
+        // Initialize download in download manager
+        this.wsServer.downloadManager.createDownload(requestId, clientId, {
+          url,
+          filename,
+          totalChunks: chunks
+        });
+        
+        res.status(202).json({
+          success: true,
+          requestId,
+          status: 'pending',
+          message: 'Download request sent to client'
+        });
+        
+      } catch (error) {
+        logger.error('Error initiating download:', error);
+        res.status(500).json({
+          success: false,
+          error: 'Failed to initiate download'
+        });
+      }
+    });
+
+    // GET /api/v1/downloads - List all downloads
+    this.app.get('/api/v1/downloads', (req, res) => {
+      const { status, clientId } = req.query;
+      
+      let downloads = Array.from(this.wsServer.downloadManager.downloads.values());
+      
+      // Apply filters
+      if (status) {
+        downloads = downloads.filter(d => d.status === status);
+      }
+      
+      if (clientId) {
+        downloads = downloads.filter(d => d.clientId === clientId);
+      }
+      
+      const downloadList = downloads.map(download => ({
+        requestId: download.id,
+        clientId: download.clientId,
+        status: download.status,
+        progress: {
+          chunksReceived: download.chunksReceived,
+          totalChunks: download.totalChunks,
+          percentage: download.progress
+        },
+        startedAt: download.createdAt.toISOString(),
+        completedAt: download.completedAt?.toISOString(),
+        url: download.url,
+        filename: download.filename
+      }));
+      
+      res.json({
+        success: true,
+        downloads: downloadList,
+        total: downloadList.length
       });
     });
 
@@ -172,13 +288,60 @@ class ExpressServer {
       });
     });
 
+    // GET /api/v1/clients/:clientId - Get specific client info
+    this.app.get('/api/v1/clients/:clientId', (req, res) => {
+      const { clientId } = req.params;
+      
+      const client = Array.from(this.wsServer.clients.values())
+        .find(c => (c.registeredId || c.id) === clientId);
+      
+      if (!client) {
+        return res.status(404).json({
+          success: false,
+          error: 'Client not found'
+        });
+      }
+      
+      // Get client's download history
+      const clientDownloads = Array.from(this.wsServer.downloadManager.downloads.values())
+        .filter(d => d.clientId === clientId);
+      
+      const clientInfo = {
+        clientId: client.registeredId || client.id,
+        connectedAt: client.connectedAt.toISOString(),
+        lastHeartbeat: client.lastHeartbeat.toISOString(),
+        status: 'connected',
+        metadata: {},
+        downloads: {
+          total: clientDownloads.length,
+          active: clientDownloads.filter(d => d.status === 'in_progress').length,
+          completed: clientDownloads.filter(d => d.status === 'completed').length,
+          failed: clientDownloads.filter(d => d.status === 'failed').length
+        }
+      };
+      
+      res.json({
+        success: true,
+        client: clientInfo
+      });
+    });
+
     this.app.use((req, res) => {
-      res.status(404).json({ error: 'Not found' });
+      res.status(404).json({ 
+        success: false,
+        error: 'Endpoint not found',
+        path: req.path,
+        method: req.method
+      });
     });
 
     this.app.use((err, req, res, next) => {
       logger.error('Express error:', err);
-      res.status(500).json({ error: 'Internal server error' });
+      res.status(500).json({ 
+        success: false,
+        error: 'Internal server error',
+        message: process.env.NODE_ENV === 'development' ? err.message : undefined
+      });
     });
   }
 
