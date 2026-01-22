@@ -97,6 +97,92 @@ clients
     }
   });
 
+// Downloads command
+const downloads = program.command('downloads')
+  .description('Manage downloads');
+
+downloads
+  .command('list')
+  .description('List downloads')
+  .option('-s, --status <status>', 'Filter by status (pending, in_progress, completed, failed, cancelled)')
+  .option('-c, --client <id>', 'Filter by client ID')
+  .option('-l, --limit <n>', 'Limit results', parseInt)
+  .option('-o, --offset <n>', 'Pagination offset', parseInt, 0)
+  .option('-f, --format <format>', 'Output format (table|json)', 'table')
+  .action(async (options) => {
+    try {
+      let path = '/api/v1/downloads';
+      const params = [];
+
+      if (options.status) {
+        params.push(`status=${encodeURIComponent(options.status)}`);
+      }
+
+      if (options.client) {
+        params.push(`clientId=${encodeURIComponent(options.client)}`);
+      }
+
+      if (params.length > 0) {
+        path += `?${params.join('&')}`;
+      }
+
+      const response = await makeRequest(path);
+
+      if (response.statusCode !== 200) {
+        console.error('Error:', response.data.error || 'Failed to fetch downloads');
+        process.exit(1);
+      }
+
+      if (!response.data || !response.data.downloads) {
+        console.error('Error: Invalid response format from server');
+        process.exit(1);
+      }
+
+      let downloadsData = response.data.downloads;
+
+      // Apply offset and limit
+      if (options.offset) {
+        downloadsData = downloadsData.slice(options.offset);
+      }
+
+      if (options.limit) {
+        downloadsData = downloadsData.slice(0, options.limit);
+      }
+
+      if (options.format === 'json') {
+        console.log(JSON.stringify(downloadsData, null, 2));
+      } else {
+        // Table format
+        const table = new Table({
+          head: ['Request ID', 'Client ID', 'Status', 'Progress', 'Filename'],
+          colWidths: [38, 38, 12, 12, 30]
+        });
+
+        if (downloadsData.length === 0) {
+          console.log('No downloads found');
+        } else {
+          downloadsData.forEach(download => {
+            const progressStr = download.progress.totalChunks > 0
+              ? `${download.progress.percentage.toFixed(1)}%`
+              : 'N/A';
+
+            table.push([
+              download.requestId,
+              download.clientId,
+              download.status,
+              progressStr,
+              download.filename
+            ]);
+          });
+          console.log(table.toString());
+        }
+      }
+    } catch (err) {
+      console.error('Error:', err.message);
+      process.exit(1);
+    }
+  });
+
 // Subcommands added in other tasks
 
 program.parse();
