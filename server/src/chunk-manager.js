@@ -3,10 +3,17 @@
  * Handles chunk reception, failure tracking, and retry statistics
  */
 
-class ChunkManager {
+const EventEmitter = require('events');
+
+const CHUNK_TIMEOUT = 30000; // 30 seconds in milliseconds
+
+class ChunkManager extends EventEmitter {
   constructor() {
+    super();
     // Main data structure to track all requests
     this.requests = new Map();
+    // Track timeout timers for each chunk
+    this.timeoutTimers = new Map(); // requestId -> Map(chunkIndex -> timerId)
   }
 
   /**
@@ -24,8 +31,15 @@ class ChunkManager {
       receivedChunks: new Set(),
       retryAttempts: new Map(),
       createdAt: new Date(),
-      lastActivity: new Date()
+      lastActivity: new Date(),
+      expectedNextChunk: 0 // Track which chunk we're expecting next
     });
+
+    // Initialize timeout timers map for this request
+    this.timeoutTimers.set(requestId, new Map());
+
+    // Start timeout for the first chunk (chunk 0)
+    this.startChunkTimeout(requestId, 0);
 
     console.log(`[ChunkManager] Initialized tracking for request ${requestId} with ${totalChunks} chunks`);
   }
@@ -52,6 +66,16 @@ class ChunkManager {
     // Clear any retry attempts for this chunk since it was received successfully
     if (request.retryAttempts.has(chunkIndex)) {
       request.retryAttempts.delete(chunkIndex);
+    }
+    
+    // Clear timeout for this chunk
+    this.clearChunkTimeout(requestId, chunkIndex);
+    
+    // Update expected next chunk and start its timeout
+    const nextChunk = chunkIndex + 1;
+    if (nextChunk < request.totalChunks) {
+      request.expectedNextChunk = nextChunk;
+      this.startChunkTimeout(requestId, nextChunk);
     }
     
     request.lastActivity = new Date();
@@ -180,6 +204,101 @@ class ChunkManager {
   }
 
   /**
+   * Start timeout timer for a specific chunk
+   * @param {string} requestId - Unique identifier for the download request
+   * @param {number} chunkIndex - Index of the chunk to set timeout for
+   */
+  startChunkTimeout(requestId, chunkIndex) {
+    const request = this.requests.get(requestId);
+    if (!request) {
+      return;
+    }
+
+    const timers = this.timeoutTimers.get(requestId);
+    if (!timers) {
+      return;
+    }
+
+    // Clear any existing timeout for this chunk
+    this.clearChunkTimeout(requestId, chunkIndex);
+
+    // Set new timeout
+    const timerId = setTimeout(() => {
+      this.handleChunkTimeout(requestId, chunkIndex);
+    }, CHUNK_TIMEOUT);
+
+    timers.set(chunkIndex, timerId);
+    console.log(`[ChunkManager] Started timeout for chunk ${chunkIndex} of request ${requestId} (${CHUNK_TIMEOUT}ms)`);
+  }
+
+  /**
+   * Clear timeout timer for a specific chunk
+   * @param {string} requestId - Unique identifier for the download request
+   * @param {number} chunkIndex - Index of the chunk to clear timeout for
+   */
+  clearChunkTimeout(requestId, chunkIndex) {
+    const timers = this.timeoutTimers.get(requestId);
+    if (!timers) {
+      return;
+    }
+
+    const timerId = timers.get(chunkIndex);
+    if (timerId) {
+      clearTimeout(timerId);
+      timers.delete(chunkIndex);
+      console.log(`[ChunkManager] Cleared timeout for chunk ${chunkIndex} of request ${requestId}`);
+    }
+  }
+
+  /**
+   * Handle chunk timeout event
+   * @param {string} requestId - Unique identifier for the download request
+   * @param {number} chunkIndex - Index of the chunk that timed out
+   */
+  handleChunkTimeout(requestId, chunkIndex) {
+    const request = this.requests.get(requestId);
+    if (!request) {
+      return;
+    }
+
+    // Check if chunk was already received (race condition protection)
+    if (request.receivedChunks.has(chunkIndex)) {
+      console.log(`[ChunkManager] Chunk ${chunkIndex} timeout fired but chunk already received for request ${requestId}`);
+      return;
+    }
+
+    console.log(`[ChunkManager] Chunk ${chunkIndex} timeout, requesting retry for request ${requestId}`);
+
+    // Mark chunk as failed with timeout reason
+    this.markChunkFailed(requestId, chunkIndex, 'timeout');
+
+    // Emit timeout event for download-manager to handle
+    this.emit('chunkTimeout', {
+      requestId,
+      chunkIndex,
+      totalChunks: request.totalChunks
+    });
+  }
+
+  /**
+   * Clear all timeouts for a request
+   * @param {string} requestId - Unique identifier for the download request
+   */
+  clearAllTimeouts(requestId) {
+    const timers = this.timeoutTimers.get(requestId);
+    if (!timers) {
+      return;
+    }
+
+    for (const [chunkIndex, timerId] of timers.entries()) {
+      clearTimeout(timerId);
+    }
+
+    timers.clear();
+    console.log(`[ChunkManager] Cleared all timeouts for request ${requestId}`);
+  }
+
+  /**
    * Clean up tracking data for a request
    * @param {string} requestId - Unique identifier for the download request
    * @returns {boolean} - True if the request existed and was cleaned up
@@ -187,6 +306,10 @@ class ChunkManager {
   cleanup(requestId) {
     const existed = this.requests.has(requestId);
     if (existed) {
+      // Clear all timeouts before cleanup
+      this.clearAllTimeouts(requestId);
+      this.timeoutTimers.delete(requestId);
+      
       this.requests.delete(requestId);
       console.log(`[ChunkManager] Cleaned up tracking for request ${requestId}`);
     }
@@ -228,6 +351,7 @@ const chunkManager = new ChunkManager();
 module.exports = {
   ChunkManager,
   chunkManager,
+  CHUNK_TIMEOUT,
   
   // Export individual methods for convenience
   initChunkTracking: (requestId, totalChunks) => chunkManager.initChunkTracking(requestId, totalChunks),
@@ -239,5 +363,8 @@ module.exports = {
   isComplete: (requestId) => chunkManager.isComplete(requestId),
   cleanup: (requestId) => chunkManager.cleanup(requestId),
   getActiveRequests: () => chunkManager.getActiveRequests(),
-  cleanupOldRequests: (maxAgeHours) => chunkManager.cleanupOldRequests(maxAgeHours)
+  cleanupOldRequests: (maxAgeHours) => chunkManager.cleanupOldRequests(maxAgeHours),
+  startChunkTimeout: (requestId, chunkIndex) => chunkManager.startChunkTimeout(requestId, chunkIndex),
+  clearChunkTimeout: (requestId, chunkIndex) => chunkManager.clearChunkTimeout(requestId, chunkIndex),
+  clearAllTimeouts: (requestId) => chunkManager.clearAllTimeouts(requestId)
 };
