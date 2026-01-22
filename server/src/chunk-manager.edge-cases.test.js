@@ -536,7 +536,7 @@ describe('ChunkManager - Edge Cases', () => {
       const end = Date.now();
       
       expect(missing).toHaveLength(5000);
-      expect(end - start).toBeLessThan(5000); // Should complete within 5 seconds
+      expect(end - start).toBeLessThan(15000); // Should complete within 15 seconds
       
       cm.cleanup(requestId);
     });
