@@ -4,7 +4,7 @@ const axios = require('axios');
 const ora = require('ora');
 const chalk = require('chalk');
 
-const API_BASE = 'http://localhost:3000/api/v1';
+const API_BASE = process.env.SERVER_URL || 'http://localhost:3001/api/v1';
 
 program
   .name('silentmode')
@@ -57,7 +57,7 @@ program
         
         const pollInterval = setInterval(async () => {
           try {
-            const statusResponse = await axios.get(`${API_BASE}/downloads/${requestId}`);
+            const statusResponse = await axios.get(`${serverUrl}/downloads/${requestId}`);
             const download = statusResponse.data;
             
             if (!download.success) {
