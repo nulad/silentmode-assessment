@@ -4,7 +4,7 @@ const axios = require('axios');
 const ora = require('ora');
 const chalk = require('chalk');
 
-const API_BASE = process.env.SERVER_URL || 'http://localhost:3001/api/v1';
+const API_BASE = process.env.SERVER_URL || 'http://localhost:3000/api/v1';
 
 program
   .name('silentmode')
@@ -26,7 +26,7 @@ program
       process.exit(1);
     }
 
-    const serverUrl = process.env.SERVER_URL || 'http://localhost:3001';
+    const serverUrl = process.env.SERVER_URL || 'http://localhost:3000';
     let spinner;
 
     try {
@@ -108,6 +108,139 @@ program
       }
       
     } catch (error) {
+      if (error.response) {
+        console.error(chalk.red(`Error: ${error.response.data.error || error.response.statusText}`));
+      } else {
+        console.error(chalk.red(`Error: ${error.message}`));
+      }
+      process.exit(1);
+    }
+  });
+
+// Clients command
+const clients = program
+  .command('clients')
+  .description('Manage connected clients');
+
+// Clients list command
+clients
+  .command('list')
+  .description('List connected clients')
+  .option('-s, --status <status>', 'Filter by status')
+  .option('-f, --format <fmt>', 'Output format (table|json)', 'table')
+  .action(async (options) => {
+    const spinner = ora('Fetching clients...').start();
+    
+    try {
+      const params = {};
+      if (options.status) {
+        params.status = options.status;
+      }
+      
+      const response = await axios.get(`${API_BASE}/clients`, { params });
+      
+      if (!response.data.success) {
+        spinner.fail('Failed to fetch clients');
+        console.error(chalk.red('Error:', response.data.error));
+        process.exit(1);
+      }
+      
+      spinner.succeed(`Found ${response.data.total} client(s)`);
+      
+      if (options.format === 'json') {
+        console.log(JSON.stringify(response.data, null, 2));
+      } else {
+        // Table format
+        if (response.data.clients.length === 0) {
+          console.log(chalk.yellow('No clients found.'));
+          return;
+        }
+        
+        console.log();
+        console.log(chalk.bold('Connected Clients:'));
+        console.log();
+        
+        response.data.clients.forEach((client, index) => {
+          console.log(`${chalk.cyan(client.clientId)}`);
+          console.log(`  Status: ${chalk.green(client.status)}`);
+          console.log(`  Connected: ${new Date(client.connectedAt).toLocaleString()}`);
+          console.log(`  Last Heartbeat: ${new Date(client.lastHeartbeat).toLocaleString()}`);
+          if (index < response.data.clients.length - 1) {
+            console.log();
+          }
+        });
+      }
+      
+    } catch (error) {
+      spinner.fail('Error fetching clients');
+      if (error.response) {
+        console.error(chalk.red(`Error: ${error.response.data.error || error.response.statusText}`));
+      } else {
+        console.error(chalk.red(`Error: ${error.message}`));
+      }
+      process.exit(1);
+    }
+  });
+
+// Clients command
+program
+  .command('clients')
+  .description('Manage connected clients');
+
+// Clients list command
+program
+  .command('clients list')
+  .description('List connected clients')
+  .option('-s, --status <status>', 'Filter by status')
+  .option('-f, --format <fmt>', 'Output format (table|json)', 'table')
+  .action(async (options) => {
+    const spinner = ora('Fetching clients...').start();
+    
+    try {
+      let url = `${API_BASE}/clients`;
+      if (options.status) {
+        url += `?status=${options.status}`;
+      }
+      
+      const response = await axios.get(url);
+      
+      spinner.succeed(`Found ${response.data.total} clients`);
+      
+      if (response.data.clients.length === 0) {
+        console.log(chalk.yellow('No clients found.'));
+        return;
+      }
+      
+      if (options.format === 'json') {
+        console.log(JSON.stringify(response.data, null, 2));
+      } else {
+        // Table format
+        console.log(chalk.bold('\nConnected Clients:'));
+        console.log('─'.repeat(80));
+        console.log(chalk.bold('Client ID'.padEnd(25)) + 
+                    chalk.bold('Status'.padEnd(12)) + 
+                    chalk.bold('Connected At'.padEnd(20)) + 
+                    chalk.bold('Last Heartbeat'));
+        console.log('─'.repeat(80));
+        
+        response.data.clients.forEach(client => {
+          const status = client.status === 'connected' 
+            ? chalk.green('● connected') 
+            : chalk.red('● disconnected');
+          
+          console.log(
+            client.clientId.padEnd(25) +
+            status.padEnd(12) +
+            new Date(client.connectedAt).toLocaleString().padEnd(20) +
+            new Date(client.lastHeartbeat).toLocaleString()
+          );
+        });
+        console.log('─'.repeat(80));
+        console.log(chalk.blue(`\nTotal: ${response.data.total} clients`));
+      }
+      
+    } catch (error) {
+      spinner.fail('Failed to fetch clients');
       if (error.response) {
         console.error(chalk.red(`Error: ${error.response.data.error || error.response.statusText}`));
       } else {
