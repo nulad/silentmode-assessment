@@ -6,6 +6,9 @@
 const EventEmitter = require('events');
 
 const CHUNK_TIMEOUT = 30000; // 30 seconds in milliseconds
+const MAX_RETRY_ATTEMPTS = 3; // Maximum number of retry attempts per chunk
+const BASE_RETRY_DELAY = 1000; // Base delay for exponential backoff (1 second)
+const MAX_RETRY_DELAY = 4000; // Maximum delay for exponential backoff (4 seconds)
 
 class ChunkManager extends EventEmitter {
   constructor() {
@@ -14,6 +17,8 @@ class ChunkManager extends EventEmitter {
     this.requests = new Map();
     // Track timeout timers for each chunk
     this.timeoutTimers = new Map(); // requestId -> Map(chunkIndex -> timerId)
+    // Track retry timers for each chunk
+    this.retryTimers = new Map(); // requestId -> Map(chunkIndex -> timerId)
   }
 
   /**
@@ -37,6 +42,8 @@ class ChunkManager extends EventEmitter {
 
     // Initialize timeout timers map for this request
     this.timeoutTimers.set(requestId, new Map());
+    // Initialize retry timers map for this request
+    this.retryTimers.set(requestId, new Map());
 
     // Start timeout for the first chunk (chunk 0)
     this.startChunkTimeout(requestId, 0);
@@ -70,6 +77,8 @@ class ChunkManager extends EventEmitter {
     
     // Clear timeout for this chunk
     this.clearChunkTimeout(requestId, chunkIndex);
+    // Clear any retry timer for this chunk
+    this.clearRetryTimer(requestId, chunkIndex);
     
     // Update expected next chunk and start its timeout
     const nextChunk = chunkIndex + 1;
@@ -121,6 +130,21 @@ class ChunkManager extends EventEmitter {
     request.lastActivity = new Date();
 
     console.log(`[ChunkManager] Marked chunk ${chunkIndex} as failed for request ${requestId}: ${reason} (${existing.attempts} attempts)`);
+    
+    // Check if we've reached max retry attempts
+    if (existing.attempts > MAX_RETRY_ATTEMPTS) {
+      console.error(`[ChunkManager] Chunk ${chunkIndex} exceeded max retry attempts (${MAX_RETRY_ATTEMPTS}) for request ${requestId}`);
+      this.emit('maxRetriesExceeded', {
+        requestId,
+        chunkIndex,
+        attempts: existing.attempts,
+        reason
+      });
+    } else {
+      // Schedule retry with exponential backoff (use attempts-1 for backoff calculation)
+      this.scheduleRetry(requestId, chunkIndex, existing.attempts - 1, reason);
+    }
+    
     return existing.attempts;
   }
 
@@ -299,6 +323,98 @@ class ChunkManager extends EventEmitter {
   }
 
   /**
+   * Clear retry timer for a specific chunk
+   * @param {string} requestId - Unique identifier for the download request
+   * @param {number} chunkIndex - Index of the chunk to clear retry timer for
+   */
+  clearRetryTimer(requestId, chunkIndex) {
+    const timers = this.retryTimers.get(requestId);
+    if (!timers) {
+      return;
+    }
+
+    const timerId = timers.get(chunkIndex);
+    if (timerId) {
+      clearTimeout(timerId);
+      timers.delete(chunkIndex);
+      console.log(`[ChunkManager] Cleared retry timer for chunk ${chunkIndex} of request ${requestId}`);
+    }
+  }
+
+  /**
+   * Clear all retry timers for a request
+   * @param {string} requestId - Unique identifier for the download request
+   */
+  clearAllRetryTimers(requestId) {
+    const timers = this.retryTimers.get(requestId);
+    if (!timers) {
+      return;
+    }
+
+    for (const [chunkIndex, timerId] of timers.entries()) {
+      clearTimeout(timerId);
+    }
+
+    timers.clear();
+    console.log(`[ChunkManager] Cleared all retry timers for request ${requestId}`);
+  }
+
+  /**
+   * Calculate exponential backoff delay
+   * @param {number} attempt - Current attempt number (0-based)
+   * @returns {number} Delay in milliseconds
+   */
+  calculateBackoffDelay(attempt) {
+    const delay = Math.min(BASE_RETRY_DELAY * Math.pow(2, attempt), MAX_RETRY_DELAY);
+    // Add some jitter to prevent thundering herd
+    const jitter = Math.random() * 0.1 * delay;
+    return Math.floor(delay + jitter);
+  }
+
+  /**
+   * Schedule a retry for a failed chunk
+   * @param {string} requestId - Unique identifier for the download request
+   * @param {number} chunkIndex - Index of the chunk to retry
+   * @param {number} attempt - Current attempt number
+   * @param {string} reason - Reason for retry
+   */
+  scheduleRetry(requestId, chunkIndex, attempt, reason) {
+    const delay = this.calculateBackoffDelay(attempt);
+    
+    console.log(`[ChunkManager] Scheduling retry ${attempt + 1}/${MAX_RETRY_ATTEMPTS} for chunk ${chunkIndex} of request ${requestId} in ${delay}ms`);
+    
+    // Clear any existing retry timer
+    this.clearRetryTimer(requestId, chunkIndex);
+    
+    // Set new retry timer
+    const timers = this.retryTimers.get(requestId);
+    if (!timers) {
+      return;
+    }
+    
+    const timerId = setTimeout(() => {
+      console.log(`[ChunkManager] Triggering retry for chunk ${chunkIndex} of request ${requestId}`);
+      
+      // Emit retry event for download-manager to handle
+      this.emit('retryChunk', {
+        requestId,
+        chunkIndex,
+        attempt: attempt + 1,
+        reason,
+        maxRetries: MAX_RETRY_ATTEMPTS
+      });
+      
+      // Clear the retry timer
+      timers.delete(chunkIndex);
+      
+      // Restart chunk timeout for this retry attempt
+      this.startChunkTimeout(requestId, chunkIndex);
+    }, delay);
+    
+    timers.set(chunkIndex, timerId);
+  }
+
+  /**
    * Clean up tracking data for a request
    * @param {string} requestId - Unique identifier for the download request
    * @returns {boolean} - True if the request existed and was cleaned up
@@ -309,6 +425,10 @@ class ChunkManager extends EventEmitter {
       // Clear all timeouts before cleanup
       this.clearAllTimeouts(requestId);
       this.timeoutTimers.delete(requestId);
+      
+      // Clear all retry timers before cleanup
+      this.clearAllRetryTimers(requestId);
+      this.retryTimers.delete(requestId);
       
       this.requests.delete(requestId);
       console.log(`[ChunkManager] Cleaned up tracking for request ${requestId}`);
@@ -352,6 +472,9 @@ module.exports = {
   ChunkManager,
   chunkManager,
   CHUNK_TIMEOUT,
+  MAX_RETRY_ATTEMPTS,
+  BASE_RETRY_DELAY,
+  MAX_RETRY_DELAY,
   
   // Export individual methods for convenience
   initChunkTracking: (requestId, totalChunks) => chunkManager.initChunkTracking(requestId, totalChunks),
@@ -366,5 +489,9 @@ module.exports = {
   cleanupOldRequests: (maxAgeHours) => chunkManager.cleanupOldRequests(maxAgeHours),
   startChunkTimeout: (requestId, chunkIndex) => chunkManager.startChunkTimeout(requestId, chunkIndex),
   clearChunkTimeout: (requestId, chunkIndex) => chunkManager.clearChunkTimeout(requestId, chunkIndex),
-  clearAllTimeouts: (requestId) => chunkManager.clearAllTimeouts(requestId)
+  clearAllTimeouts: (requestId) => chunkManager.clearAllTimeouts(requestId),
+  clearRetryTimer: (requestId, chunkIndex) => chunkManager.clearRetryTimer(requestId, chunkIndex),
+  clearAllRetryTimers: (requestId) => chunkManager.clearAllRetryTimers(requestId),
+  calculateBackoffDelay: (attempt) => chunkManager.calculateBackoffDelay(attempt),
+  scheduleRetry: (requestId, chunkIndex, attempt, reason) => chunkManager.scheduleRetry(requestId, chunkIndex, attempt, reason)
 };
