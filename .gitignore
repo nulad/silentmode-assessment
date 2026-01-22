@@ -140,3 +140,4 @@ vite.config.ts.timestamp-*
 
 # bv (beads viewer) local config and caches
 .bv/
+server/downloads/.tmp/

@@ -3,6 +3,8 @@ const { program } = require('commander');
 const axios = require('axios');
 const ora = require('ora');
 const chalk = require('chalk');
+const Table = require('cli-table3');
+const cliProgress = require('cli-progress');
 
 const API_BASE = process.env.SERVER_URL || 'http://localhost:3000/api/v1';
 
@@ -117,131 +119,51 @@ program
     }
   });
 
-// Clients command
-const clients = program
-  .command('clients')
-  .description('Manage connected clients');
+// Clients commands
+const clientsCmd = program.command('clients');
 
-// Clients list command
-clients
+clientsCmd
   .command('list')
-  .description('List connected clients')
-  .option('-s, --status <status>', 'Filter by status')
-  .option('-f, --format <fmt>', 'Output format (table|json)', 'table')
+  .description('List all connected clients')
+  .option('-s, --status <status>', 'Filter by status (connected)')
   .action(async (options) => {
-    const spinner = ora('Fetching clients...').start();
-    
     try {
-      const params = {};
-      if (options.status) {
-        params.status = options.status;
-      }
+      const spinner = ora('Fetching clients...').start();
+      const response = await axios.get(`${API_BASE}/clients`, {
+        params: { status: options.status }
+      });
       
-      const response = await axios.get(`${API_BASE}/clients`, { params });
+      spinner.stop();
       
       if (!response.data.success) {
-        spinner.fail('Failed to fetch clients');
         console.error(chalk.red('Error:', response.data.error));
         process.exit(1);
       }
-      
-      spinner.succeed(`Found ${response.data.total} client(s)`);
-      
-      if (options.format === 'json') {
-        console.log(JSON.stringify(response.data, null, 2));
-      } else {
-        // Table format
-        if (response.data.clients.length === 0) {
-          console.log(chalk.yellow('No clients found.'));
-          return;
-        }
-        
-        console.log();
-        console.log(chalk.bold('Connected Clients:'));
-        console.log();
-        
-        response.data.clients.forEach((client, index) => {
-          console.log(`${chalk.cyan(client.clientId)}`);
-          console.log(`  Status: ${chalk.green(client.status)}`);
-          console.log(`  Connected: ${new Date(client.connectedAt).toLocaleString()}`);
-          console.log(`  Last Heartbeat: ${new Date(client.lastHeartbeat).toLocaleString()}`);
-          if (index < response.data.clients.length - 1) {
-            console.log();
-          }
-        });
-      }
-      
-    } catch (error) {
-      spinner.fail('Error fetching clients');
-      if (error.response) {
-        console.error(chalk.red(`Error: ${error.response.data.error || error.response.statusText}`));
-      } else {
-        console.error(chalk.red(`Error: ${error.message}`));
-      }
-      process.exit(1);
-    }
-  });
-
-
-// Clients command
-program
-  .command('clients')
-  .description('Manage connected clients');
-
-// Clients list command
-program
-  .command('clients list')
-  .description('List connected clients')
-  .option('-s, --status <status>', 'Filter by status')
-  .option('-f, --format <fmt>', 'Output format (table|json)', 'table')
-  .action(async (options) => {
-    const spinner = ora('Fetching clients...').start();
-    
-    try {
-      let url = `${API_BASE}/clients`;
-      if (options.status) {
-        url += `?status=${options.status}`;
-      }
-      
-      const response = await axios.get(url);
-      
-      spinner.succeed(`Found ${response.data.total} clients`);
       
       if (response.data.clients.length === 0) {
         console.log(chalk.yellow('No clients found.'));
         return;
       }
       
-      if (options.format === 'json') {
-        console.log(JSON.stringify(response.data, null, 2));
-      } else {
-        // Table format
-        console.log(chalk.bold('\nConnected Clients:'));
-        console.log('─'.repeat(80));
-        console.log(chalk.bold('Client ID'.padEnd(25)) + 
-                    chalk.bold('Status'.padEnd(12)) + 
-                    chalk.bold('Connected At'.padEnd(20)) + 
-                    chalk.bold('Last Heartbeat'));
-        console.log('─'.repeat(80));
-        
-        response.data.clients.forEach(client => {
-          const status = client.status === 'connected' 
-            ? chalk.green('● connected') 
-            : chalk.red('● disconnected');
-          
-          console.log(
-            client.clientId.padEnd(25) +
-            status.padEnd(12) +
-            new Date(client.connectedAt).toLocaleString().padEnd(20) +
-            new Date(client.lastHeartbeat).toLocaleString()
-          );
-        });
-        console.log('─'.repeat(80));
-        console.log(chalk.blue(`\nTotal: ${response.data.total} clients`));
-      }
+      const table = new Table({
+        head: [chalk.cyan('Client ID'), chalk.cyan('Connected At'), chalk.cyan('Last Heartbeat'), chalk.cyan('Status')],
+        colWidths: [30, 25, 25, 15]
+      });
+      
+      response.data.clients.forEach(client => {
+        const status = client.status === 'connected' ? chalk.green('● ' + client.status) : chalk.red('● ' + client.status);
+        table.push([
+          client.clientId,
+          new Date(client.connectedAt).toLocaleString(),
+          new Date(client.lastHeartbeat).toLocaleString(),
+          status
+        ]);
+      });
+      
+      console.log(table.toString());
+      console.log(chalk.gray(`\nTotal: ${response.data.total} clients`));
       
     } catch (error) {
-      spinner.fail('Failed to fetch clients');
       if (error.response) {
         console.error(chalk.red(`Error: ${error.response.data.error || error.response.statusText}`));
       } else {
@@ -251,6 +173,277 @@ program
     }
   });
 
-// Subcommands added in other tasks
+clientsCmd
+  .command('get <clientId>')
+  .description('Get details of a specific client')
+  .option('-f, --format <fmt>', 'Output format (table|json)', 'table')
+  .action(async (clientId, options) => {
+    try {
+      const spinner = ora('Fetching client details...').start();
+      const response = await axios.get(`${API_BASE}/clients/${clientId}`);
+      
+      spinner.stop();
+      
+      if (!response.data.success) {
+        console.error(chalk.red('Error:', response.data.error));
+        process.exit(1);
+      }
+      
+      const client = response.data.client;
+      
+      if (options.format === 'json') {
+        console.log(JSON.stringify(client, null, 2));
+      } else {
+        const table = new Table();
+        table.push(
+          { [chalk.cyan('Client ID')]: client.clientId },
+          { [chalk.cyan('Connected At')]: new Date(client.connectedAt).toLocaleString() },
+          { [chalk.cyan('Last Heartbeat')]: new Date(client.lastHeartbeat).toLocaleString() },
+          { [chalk.cyan('Status')]: client.status === 'connected' ? chalk.green(client.status) : chalk.red(client.status) }
+        );
+        
+        console.log(table.toString());
+      }
+      
+    } catch (error) {
+      if (error.response && error.response.status === 404) {
+        console.error(chalk.red(`Client ${clientId} not found.`));
+      } else if (error.response) {
+        console.error(chalk.red(`Error: ${error.response.data.error || error.response.statusText}`));
+      } else {
+        console.error(chalk.red(`Error: ${error.message}`));
+      }
+      process.exit(1);
+    }
+  });
+
+// Downloads commands
+const downloadsCmd = program.command('downloads');
+
+downloadsCmd
+  .command('list')
+  .description('List all downloads')
+  .option('-s, --status <status>', 'Filter by status (pending, in_progress, completed, failed, cancelled)')
+  .action(async (options) => {
+    console.log(chalk.yellow('Downloads list endpoint not yet implemented in server.'));
+    console.log(chalk.gray('This will be available when the server maintains a download history.'));
+  });
+
+downloadsCmd
+  .command('status <requestId>')
+  .description('Get status of a specific download')
+  .option('-w, --watch', 'Watch progress in real-time', false)
+  .action(async (requestId, options) => {
+    const serverUrl = process.env.SERVER_URL || 'http://localhost:3001';
+    
+    try {
+      if (options.watch) {
+        const progressBar = new cliProgress.SingleBar({
+          format: chalk.cyan('Progress') + ' |{bar}| {percentage}% | {value}/{total} Chunks | {speed}',
+          barCompleteChar: '\u2588',
+          barIncompleteChar: '\u2591',
+          hideCursor: true
+        });
+        
+        let progressBarStarted = false;
+        
+        const pollInterval = setInterval(async () => {
+          try {
+            const response = await axios.get(`${serverUrl}/downloads/${requestId}`);
+            const download = response.data;
+            
+            if (!download.success) {
+              console.error(chalk.red('Error:', download.error));
+              clearInterval(pollInterval);
+              process.exit(1);
+            }
+            
+            if (!progressBarStarted && download.progress.totalChunks > 0) {
+              progressBar.start(download.progress.totalChunks, download.progress.chunksReceived, { speed: '0 MB/s' });
+              progressBarStarted = true;
+            }
+            
+            if (progressBarStarted) {
+              progressBar.update(download.progress.chunksReceived, { 
+                speed: `${((download.progress.bytesReceived / 1024 / 1024) / ((Date.now() - new Date(download.startedAt).getTime()) / 1000)).toFixed(2)} MB/s` 
+              });
+            }
+            
+            if (download.status === 'completed') {
+              if (progressBarStarted) progressBar.stop();
+              console.log(chalk.green('\n✓ Download completed!'));
+              console.log(`  Duration: ${download.duration}ms`);
+              console.log(`  Size: ${(download.progress.bytesReceived / (1024 * 1024)).toFixed(2)} MB`);
+              if (download.retryStats.totalRetries > 0) {
+                console.log(`  Retries: ${download.retryStats.totalRetries}`);
+                console.log(`  Retry Success Rate: ${(download.retryStats.retrySuccessRate * 100).toFixed(1)}%`);
+              }
+              clearInterval(pollInterval);
+            } else if (download.status === 'failed') {
+              if (progressBarStarted) progressBar.stop();
+              console.error(chalk.red('\n✗ Download failed'));
+              console.error(chalk.red(download.error));
+              clearInterval(pollInterval);
+              process.exit(1);
+            } else if (download.status === 'cancelled') {
+              if (progressBarStarted) progressBar.stop();
+              console.log(chalk.yellow('\n⚠ Download cancelled'));
+              clearInterval(pollInterval);
+            }
+          } catch (error) {
+            if (progressBarStarted) progressBar.stop();
+            console.error(chalk.red('Error checking progress:', error.message));
+            clearInterval(pollInterval);
+            process.exit(1);
+          }
+        }, 1000);
+        
+        process.on('SIGINT', () => {
+          if (progressBarStarted) progressBar.stop();
+          console.log('\nStopped watching download progress.');
+          clearInterval(pollInterval);
+          process.exit(0);
+        });
+        
+      } else {
+        const spinner = ora('Fetching download status...').start();
+        const response = await axios.get(`${serverUrl}/downloads/${requestId}`);
+        
+        spinner.stop();
+        
+        if (!response.data.success) {
+          console.error(chalk.red('Error:', response.data.error));
+          process.exit(1);
+        }
+        
+        const download = response.data;
+        const table = new Table();
+        
+        table.push(
+          { [chalk.cyan('Request ID')]: download.requestId },
+          { [chalk.cyan('Client ID')]: download.clientId },
+          { [chalk.cyan('Status')]: getStatusColored(download.status) },
+          { [chalk.cyan('Progress')]: `${download.progress.chunksReceived}/${download.progress.totalChunks} chunks (${download.progress.percentage}%)` },
+          { [chalk.cyan('Size')]: `${(download.progress.bytesReceived / (1024 * 1024)).toFixed(2)} MB` }
+        );
+        
+        if (download.startedAt) {
+          table.push({ [chalk.cyan('Started At')]: new Date(download.startedAt).toLocaleString() });
+        }
+        
+        if (download.completedAt) {
+          table.push(
+            { [chalk.cyan('Completed At')]: new Date(download.completedAt).toLocaleString() },
+            { [chalk.cyan('Duration')]: `${download.duration}ms` }
+          );
+        }
+        
+        if (download.retryStats.totalRetries > 0) {
+          table.push(
+            { [chalk.cyan('Total Retries')]: download.retryStats.totalRetries },
+            { [chalk.cyan('Retry Success Rate')]: `${(download.retryStats.retrySuccessRate * 100).toFixed(1)}%` }
+          );
+        }
+        
+        if (download.error) {
+          table.push({ [chalk.cyan('Error')]: chalk.red(download.error) });
+        }
+        
+        console.log(table.toString());
+      }
+      
+    } catch (error) {
+      if (error.response) {
+        console.error(chalk.red(`Error: ${error.response.data.error || error.response.statusText}`));
+      } else {
+        console.error(chalk.red(`Error: ${error.message}`));
+      }
+      process.exit(1);
+    }
+  });
+
+downloadsCmd
+  .command('cancel <requestId>')
+  .description('Cancel a download')
+  .action(async (requestId) => {
+    try {
+      const spinner = ora('Cancelling download...').start();
+      const response = await axios.delete(`${API_BASE}/downloads/${requestId}`);
+      
+      spinner.stop();
+      
+      if (!response.data.success) {
+        console.error(chalk.red('Error:', response.data.error));
+        process.exit(1);
+      }
+      
+      console.log(chalk.green(`✓ Download ${requestId} cancelled successfully`));
+      
+    } catch (error) {
+      if (error.response) {
+        console.error(chalk.red(`Error: ${error.response.data.error || error.response.statusText}`));
+      } else {
+        console.error(chalk.red(`Error: ${error.message}`));
+      }
+      process.exit(1);
+    }
+  });
+
+// Health command
+program
+  .command('health')
+  .description('Check server health')
+  .option('-v, --verbose', 'Show detailed health information')
+  .action(async (options) => {
+    try {
+      const spinner = ora('Checking server health...').start();
+      const response = await axios.get(`${API_BASE}/health`);
+      
+      spinner.stop();
+      
+      if (!response.data.success) {
+        console.error(chalk.red('Server is unhealthy'));
+        process.exit(1);
+      }
+      
+      const health = response.data;
+      const table = new Table();
+      
+      table.push(
+        { [chalk.cyan('Status')]: chalk.green('Healthy') },
+        { [chalk.cyan('Uptime')]: `${health.uptime}ms` },
+        { [chalk.cyan('Memory Used')]: `${Math.round(health.memoryUsed / 1024 / 1024)} MB` },
+        { [chalk.cyan('Active Downloads')]: health.activeDownloads },
+        { [chalk.cyan('Version')]: health.version }
+      );
+      
+      console.log(table.toString());
+      
+      if (options.verbose) {
+        console.log(chalk.gray('\nDetailed information:'));
+        console.log(JSON.stringify(health, null, 2));
+      }
+      
+    } catch (error) {
+      if (error.response) {
+        console.error(chalk.red(`Error: ${error.response.data.error || error.response.statusText}`));
+      } else {
+        console.error(chalk.red(`Error: ${error.message}`));
+      }
+      process.exit(1);
+    }
+  });
+
+// Helper function for colored status
+function getStatusColored(status) {
+  switch (status) {
+    case 'completed': return chalk.green(status);
+    case 'failed': return chalk.red(status);
+    case 'cancelled': return chalk.yellow(status);
+    case 'in_progress': return chalk.blue(status);
+    case 'pending': return chalk.gray(status);
+    default: return status;
+  }
+}
 
 program.parse();
