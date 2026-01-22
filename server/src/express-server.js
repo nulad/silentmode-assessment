@@ -44,6 +44,70 @@ class ExpressServer {
       });
     });
 
+    this.app.get('/api/v1/downloads', (req, res) => {
+      try {
+        const { status, clientId, limit = 50, offset = 0 } = req.query;
+        
+        // Get all downloads from download manager
+        let downloads = this.wsServer.downloadManager.getAllDownloads();
+        
+        // Apply filters
+        if (status) {
+          downloads = downloads.filter(d => d.status === status);
+        }
+        
+        if (clientId) {
+          downloads = downloads.filter(d => d.clientId === clientId);
+        }
+        
+        // Sort by creation date (newest first)
+        downloads.sort((a, b) => b.createdAt - a.createdAt);
+        
+        // Get total count before pagination
+        const total = downloads.length;
+        
+        // Apply pagination
+        const limitNum = parseInt(limit, 10);
+        const offsetNum = parseInt(offset, 10);
+        
+        const paginatedDownloads = downloads.slice(offsetNum, offsetNum + limitNum);
+        
+        // Transform downloads for response (remove internal fields)
+        const responseDownloads = paginatedDownloads.map(d => ({
+          id: d.id,
+          clientId: d.clientId,
+          filePath: d.filePath,
+          status: d.status,
+          progress: d.progress,
+          createdAt: d.createdAt,
+          updatedAt: d.updatedAt,
+          completedAt: d.completedAt,
+          fileSize: d.fileSize,
+          totalChunks: d.totalChunks,
+          chunksReceived: d.chunksReceived,
+          error: d.error,
+          duration: d.duration,
+          finalFilePath: d.finalFilePath,
+          finalFileSize: d.finalFileSize,
+          checksumVerified: d.checksumVerified
+        }));
+        
+        res.json({
+          success: true,
+          downloads: responseDownloads,
+          total,
+          limit: limitNum,
+          offset: offsetNum
+        });
+      } catch (error) {
+        logger.error('Error fetching downloads:', error);
+        res.status(500).json({
+          success: false,
+          error: 'Internal server error'
+        });
+      }
+    });
+
     this.app.use((req, res) => {
       res.status(404).json({ error: 'Not found' });
     });
