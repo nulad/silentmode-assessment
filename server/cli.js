@@ -117,6 +117,74 @@ program
     }
   });
 
+// Clients command group
+const clientsCommand = program
+  .command('clients')
+  .description('Manage clients');
+
+// Clients list command
+clientsCommand
+  .command('list')
+  .description('List connected clients')
+  .option('-s, --status <status>', 'Filter by status')
+  .option('-f, --format <fmt>', 'Output format (table|json)', 'table')
+  .action(async (options) => {
+    const spinner = ora('Fetching clients...').start();
+    
+    try {
+      const params = {};
+      if (options.status) {
+        params.status = options.status;
+      }
+      
+      const response = await axios.get(`${API_BASE}/clients`, { params });
+      
+      if (!response.data.success) {
+        spinner.fail('Failed to fetch clients');
+        console.error(chalk.red('Error:', response.data.error));
+        process.exit(1);
+      }
+      
+      spinner.succeed(`Found ${response.data.clients.length} client(s)`);
+      
+      if (options.format === 'json') {
+        console.log(JSON.stringify(response.data, null, 2));
+      } else {
+        // Table format
+        if (response.data.clients.length === 0) {
+          console.log(chalk.yellow('No clients found'));
+          return;
+        }
+        
+        console.log();
+        console.log(chalk.bold('Connected Clients:'));
+        console.log();
+        
+        response.data.clients.forEach((client, index) => {
+          console.log(`${chalk.cyan(client.clientId)}`);
+          console.log(`  Status: ${chalk.green(client.status)}`);
+          console.log(`  Connected: ${new Date(client.connectedAt).toLocaleString()}`);
+          console.log(`  Last Heartbeat: ${new Date(client.lastHeartbeat).toLocaleString()}`);
+          if (index < response.data.clients.length - 1) {
+            console.log();
+          }
+        });
+      }
+      
+    } catch (error) {
+      spinner.fail('Error fetching clients');
+      if (error.response) {
+        console.error(chalk.red(`Error: ${error.response.data.error || error.response.statusText}`));
+      } else if (error.code === 'ECONNREFUSED') {
+        console.error(chalk.red('Error: Could not connect to server'));
+        console.error(chalk.yellow('Hint: Make sure the server is running on', API_BASE.replace('/api/v1', '')));
+      } else {
+        console.error(chalk.red(`Error: ${error.message}`));
+      }
+      process.exit(1);
+    }
+  });
+
 // Subcommands added in other tasks
 
 program.parse();
