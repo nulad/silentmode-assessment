@@ -22,7 +22,7 @@ class ChunkManager extends EventEmitter {
    * @param {number} totalChunks - Total number of chunks expected
    */
   initChunkTracking(requestId, totalChunks) {
-    if (!requestId || typeof requestId !== 'string' || requestId.trim() === '' || typeof totalChunks !== 'number' || totalChunks <= 0 || !Number.isInteger(totalChunks)) {
+    if (!requestId || typeof requestId !== 'string' || typeof totalChunks !== 'number' || totalChunks <= 0) {
       throw new Error('Invalid requestId or totalChunks');
     }
 
@@ -57,7 +57,7 @@ class ChunkManager extends EventEmitter {
       throw new Error(`Request ${requestId} not found`);
     }
 
-    if (typeof chunkIndex !== 'number' || chunkIndex < 0 || chunkIndex >= request.totalChunks || !Number.isInteger(chunkIndex)) {
+    if (typeof chunkIndex !== 'number' || chunkIndex < 0 || chunkIndex >= request.totalChunks) {
       throw new Error(`Invalid chunkIndex: ${chunkIndex}`);
     }
 
@@ -104,11 +104,11 @@ class ChunkManager extends EventEmitter {
       throw new Error(`Request ${requestId} not found`);
     }
 
-    if (typeof chunkIndex !== 'number' || chunkIndex < 0 || chunkIndex >= request.totalChunks || !Number.isInteger(chunkIndex)) {
+    if (typeof chunkIndex !== 'number' || chunkIndex < 0 || chunkIndex >= request.totalChunks) {
       throw new Error(`Invalid chunkIndex: ${chunkIndex}`);
     }
 
-    if (!reason || typeof reason !== 'string' || reason.trim() === '') {
+    if (!reason || typeof reason !== 'string') {
       throw new Error('Reason must be a non-empty string');
     }
 
@@ -269,7 +269,7 @@ class ChunkManager extends EventEmitter {
     }
 
     // Check if chunk index is valid
-    if (typeof chunkIndex !== 'number' || chunkIndex < 0 || chunkIndex >= request.totalChunks || !Number.isInteger(chunkIndex)) {
+    if (typeof chunkIndex !== 'number' || chunkIndex < 0 || chunkIndex >= request.totalChunks) {
       console.log(`[ChunkManager] Invalid chunk index ${chunkIndex} in timeout for request ${requestId}`);
       return;
     }
