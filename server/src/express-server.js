@@ -44,6 +44,59 @@ class ExpressServer {
       });
     });
 
+    this.app.get('/api/v1/downloads/:requestId', (req, res) => {
+      const { requestId } = req.params;
+      const download = this.wsServer.downloadManager.getDownload(requestId);
+      
+      if (!download) {
+        return res.status(404).json({
+          success: false,
+          error: 'Download not found'
+        });
+      }
+      
+      // Format retried chunks array
+      const retriedChunks = Array.from(download.failedChunks.entries()).map(([chunkIndex, failure]) => ({
+        chunkIndex,
+        attempts: failure.attempts || 1,
+        lastRetryAt: failure.lastRetryAt,
+        error: failure.error
+      }));
+      
+      // Calculate bytes received based on chunks received and chunk size
+      const CHUNK_SIZE = 1048576; // 1MB
+      const bytesReceived = download.chunksReceived * CHUNK_SIZE;
+      
+      const response = {
+        success: true,
+        requestId: download.id,
+        clientId: download.clientId,
+        status: download.status,
+        progress: {
+          chunksReceived: download.chunksReceived,
+          totalChunks: download.totalChunks,
+          percentage: download.progress,
+          bytesReceived: bytesReceived,
+          retriedChunks: retriedChunks
+        },
+        startedAt: download.createdAt.toISOString()
+      };
+      
+      // Add additional fields based on status
+      if (download.status === 'completed') {
+        response.completedAt = download.completedAt?.toISOString();
+        response.duration = download.duration;
+        response.filePath = download.finalFilePath;
+        response.fileSize = download.finalFileSize;
+        response.checksumVerified = download.checksumVerified;
+      } else if (download.status === 'failed' || download.status === 'cancelled') {
+        response.error = download.error;
+        response.completedAt = download.completedAt?.toISOString();
+      }
+      
+      res.json(response);
+    });
+
     this.app.use((req, res) => {
       res.status(404).json({ error: 'Not found' });
     });
