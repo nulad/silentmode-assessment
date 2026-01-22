@@ -78,6 +78,55 @@ class ExpressServer {
       });
     });
 
+    this.app.get('/api/v1/clients/:clientId', (req, res) => {
+      const { clientId } = req.params;
+      const clients = this.wsServer.getConnectedClients();
+      
+      // Find the client with matching clientId
+      const client = clients.find(c => (c.registeredId || c.id) === clientId);
+      
+      if (!client) {
+        return res.status(404).json({
+          success: false,
+          error: {
+            code: 'CLIENT_NOT_FOUND',
+            message: `Client with ID '${clientId}' not found`
+          }
+        });
+      }
+      
+      const clientInfo = this.wsServer.clients.get(client.id);
+      
+      // Get download history for this client
+      const downloadHistory = [];
+      if (clientInfo && clientInfo.downloadHistory) {
+        clientInfo.downloadHistory.forEach(download => {
+          downloadHistory.push({
+            requestId: download.requestId,
+            filename: download.filename,
+            status: download.status,
+            createdAt: download.createdAt,
+            completedAt: download.completedAt
+          });
+        });
+      }
+      
+      res.json({
+        success: true,
+        client: {
+          clientId: client.registeredId || client.id,
+          connectedAt: client.connectedAt.toISOString(),
+          lastHeartbeat: clientInfo ? clientInfo.lastHeartbeat.toISOString() : client.connectedAt.toISOString(),
+          status: clientInfo && clientInfo.ws.readyState === 1 ? 'connected' : 'disconnected',
+          metadata: {
+            ip: client.ip,
+            internalId: client.id
+          },
+          downloadHistory
+        }
+      });
+    });
+
     this.app.use((req, res) => {
       res.status(404).json({ error: 'Not found' });
     });
