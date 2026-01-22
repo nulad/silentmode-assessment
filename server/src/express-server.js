@@ -4,6 +4,7 @@ const helmet = require('helmet');
 const logger = require('./utils/logger');
 const config = require('./config');
 const packageJson = require('../package.json');
+const { validateGetDownload, validateDeleteDownload } = require('./validation');
 const { v4: uuidv4 } = require('uuid');
 const { AppError, errorMiddleware, asyncHandler } = require('./utils/error-handler');
 const { ERROR_CODES } = require('../../shared/protocol');
@@ -98,37 +99,11 @@ class ExpressServer {
       });
     });
 
-    // POST /api/v1/downloads - Initiate a new download
-    this.app.post('/api/v1/downloads', (req, res) => {
-      const { url, filename, clientId, chunks } = req.body;
-
-      // Validation
-      if (!url || typeof url !== 'string') {
-        return res.status(400).json({
-          success: false,
-          error: 'URL is required and must be a string'
-        });
-      }
-
-      if (!filename || typeof filename !== 'string') {
-        return res.status(400).json({
-          success: false,
-          error: 'Filename is required and must be a string'
-        });
-      }
-
-      if (!clientId || typeof clientId !== 'string') {
-        return res.status(400).json({
-          success: false,
-          error: 'Client ID is required and must be a string'
-        });
-      }
-
-      // Check if client exists
-      const client = Array.from(this.wsServer.clients.values())
-        .find(c => (c.registeredId || c.id) === clientId);
-
-      if (!client) {
+    this.app.get('/api/v1/downloads/:requestId', validateGetDownload, (req, res) => {
+      const { requestId } = req.params;
+      const download = this.wsServer.downloadManager.getDownload(requestId);
+      
+      if (!download) {
         return res.status(404).json({
           success: false,
           error: 'Client not found or not connected'
@@ -213,7 +188,7 @@ class ExpressServer {
       });
     });
 
-    this.app.get('/api/v1/downloads/:requestId', (req, res, next) => {
+    this.app.get('/api/v1/downloads/:requestId', validateGetDownload, (req, res) => {
       try {
         const { requestId } = req.params;
         const download = this.wsServer.downloadManager.getDownload(requestId);
@@ -259,7 +234,7 @@ class ExpressServer {
       }
     });
 
-    this.app.delete('/api/v1/downloads/:requestId', asyncHandler(async (req, res) => {
+    this.app.delete('/api/v1/downloads/:requestId', validateDeleteDownload, async (req, res) => {
       const { requestId } = req.params;
       const download = this.wsServer.downloadManager.getDownload(requestId);
 
