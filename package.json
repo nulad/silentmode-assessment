@@ -1,4 +1,8 @@
 {
+  "scripts": {
+    "lint": "echo 'No linting configured'",
+    "test": "cd server && npm test"
+  },
   "dependencies": {
     "axios": "^1.13.2",
     "ws": "^8.19.0"

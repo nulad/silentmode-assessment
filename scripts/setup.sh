@@ -97,14 +97,7 @@ main() {
     
     # Create environment files
     print_header "Setting up Environment"
-    
-    if [ ! -f .env ]; then
-        cp .env.example .env
-        print_success "Created .env file from template"
-    else
-        print_warning ".env file already exists"
-    fi
-    
+
     if [ ! -f server/.env ]; then
         cp server/.env.example server/.env
         print_success "Created server/.env file from template"
@@ -121,10 +114,9 @@ main() {
     
     # Generate test files
     print_header "Generating Test Files"
-    
+
     echo "Generating test files for development..."
-    ./scripts/generate-test.sh test-10mb.dat 10
-    ./scripts/generate-test.sh test-50mb.dat 50
+    node scripts/generate-test-files.js
     print_success "Test files generated"
     
     # Setup git hooks
@@ -160,11 +152,11 @@ EOF
     print_header "Verifying Installation"
     
     echo "Testing server startup..."
-    timeout 5 npm run server:start > /dev/null 2>&1 || true
+    timeout 5 npm start --prefix server > /dev/null 2>&1 || true
     print_success "Server can start"
     
     echo "Testing CLI tool..."
-    node cli.js --help > /dev/null 2>&1
+    node server/cli.js --help > /dev/null 2>&1
     print_success "CLI tool works"
     
     # Print next steps
@@ -174,15 +166,15 @@ EOF
     echo ""
     echo "Next steps:"
     echo "1. Review the configuration in .env files"
-    echo "2. Start the server: npm run server:start"
-    echo "3. Start the client: npm run client:start"
-    echo "4. Or use the CLI: node cli.js --help"
+    echo "2. Start the server: npm start --prefix server"
+    echo "3. Start the client: npm start --prefix client"
+    echo "4. Or use the CLI: node server/cli.js --help"
     echo ""
     echo "Useful commands:"
-    echo "- Start server:     npm run server:start"
-    echo "- Start client:     npm run client:start"
+    echo "- Start server:     npm start --prefix server"
+    echo "- Start client:     npm start --prefix client"
     echo "- Run tests:        npm test"
-    echo "- Generate test:    ./scripts/generate-test.sh [filename] [sizeMB]"
+    echo "- Generate test:    node scripts/generate-test-files.js [filename] [sizeMB]"
     echo "- Run E2E test:     ./scripts/e2e-test.sh"
     echo ""
     echo "Documentation:"

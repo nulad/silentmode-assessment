@@ -12,6 +12,14 @@ class WebSocketClient {
     this.reconnectAttempts = 0;
     this.fileHandler = new FileHandler();
     this.activeDownloads = new Map(); // requestId -> filePath
+
+    // Debug mode for testing retry functionality
+    this.debugFailChunks = process.env.DEBUG_FAIL_CHUNKS === 'true';
+    this.debugFailProbability = parseFloat(process.env.DEBUG_FAIL_CHUNK_PROBABILITY || '0.3');
+
+    if (this.debugFailChunks) {
+      logger.warn(`⚠️  DEBUG MODE: Chunk failures enabled (${(this.debugFailProbability * 100).toFixed(0)}% failure rate)`);
+    }
   }
 
   async start() {
@@ -166,7 +174,14 @@ class WebSocketClient {
         
         // Convert to base64
         const base64Data = chunkData.toString('base64');
-        
+
+        // Debug mode: Randomly skip chunks to simulate network failures
+        if (this.debugFailChunks && Math.random() < this.debugFailProbability) {
+          logger.warn(`🔧 [DEBUG] Intentionally skipping chunk ${chunkIndex}/${fileInfo.totalChunks} to simulate network failure`);
+          // Skip sending this chunk - it will trigger a retry from the server
+          continue;
+        }
+
         // Send FILE_CHUNK message
         this.send({
           type: MESSAGE_TYPES.FILE_CHUNK,
