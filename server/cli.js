@@ -6,7 +6,7 @@ const chalk = require('chalk');
 const Table = require('cli-table3');
 const cliProgress = require('cli-progress');
 
-const API_BASE = process.env.SERVER_URL || 'http://localhost:3001/api/v1';
+const API_BASE = process.env.SERVER_URL || 'http://localhost:3000/api/v1';
 
 program
   .name('silentmode')
@@ -28,7 +28,7 @@ program
       process.exit(1);
     }
 
-    const serverUrl = process.env.SERVER_URL || 'http://localhost:3001';
+    const serverUrl = process.env.SERVER_URL || 'http://localhost:3000';
     let spinner;
 
     try {
