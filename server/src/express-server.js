@@ -28,6 +28,54 @@ class ExpressServer {
   }
 
   setupRoutes() {
+    this.app.post('/api/v1/downloads', async (req, res) => {
+      const { clientId, filePath, outputPath, timeout } = req.body;
+      
+      if (!clientId || !filePath) {
+        return res.status(400).json({
+          success: false,
+          error: 'clientId and filePath are required'
+        });
+      }
+      
+      // Check if client is connected
+      const client = this.wsServer.clients.get(clientId);
+      if (!client) {
+        return res.status(404).json({
+          success: false,
+          error: 'Client not connected'
+        });
+      }
+      
+      try {
+        // Create download request
+        const requestId = this.wsServer.downloadManager.createDownload(clientId, filePath, null, null);
+        
+        // Send DOWNLOAD_REQUEST to client
+        this.wsServer.sendToClient(clientId, {
+          type: 'DOWNLOAD_REQUEST',
+          requestId,
+          filePath,
+          outputPath: outputPath || null,
+          timeout: timeout || 30000
+        });
+        
+        logger.info(`Initiated download ${requestId} for client ${clientId}, file: ${filePath}`);
+        
+        res.status(202).json({
+          success: true,
+          requestId,
+          status: 'pending'
+        });
+      } catch (error) {
+        logger.error('Error initiating download:', error);
+        res.status(500).json({
+          success: false,
+          error: 'Failed to initiate download'
+        });
+      }
+    });
+
     this.app.get('/api/v1/health', (req, res) => {
       const uptime = Math.floor((Date.now() - this.startTime) / 1000);
       const connectedClients = this.wsServer.clients.size;
@@ -143,6 +191,76 @@ class ExpressServer {
         res.status(500).json({
           success: false,
           error: 'Failed to cancel download'
+        });
+      }
+    });
+
+    this.app.post('/api/v1/downloads', async (req, res) => {
+      const { clientId, filePath, output, timeout = 30000 } = req.body;
+      
+      if (!clientId || !filePath) {
+        return res.status(400).json({
+          success: false,
+          error: 'clientId and filePath are required'
+        });
+      }
+      
+      try {
+        // Generate a unique request ID
+        const requestId = `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        
+        // Create download in manager
+        this.wsServer.downloadManager.createDownload(clientId, filePath, requestId, 'cli');
+        
+        // Find the target client
+        let targetClientId = null;
+        for (const [cid, client] of this.wsServer.clients.entries()) {
+          if (client.registeredId === clientId) {
+            targetClientId = cid;
+            break;
+          }
+        }
+        
+        if (!targetClientId) {
+          logger.error(`Target client ${clientId} not found`);
+          this.wsServer.downloadManager.failDownload(requestId, new Error('Client not found'));
+          return res.status(404).json({
+            success: false,
+            error: 'Client not found'
+          });
+        }
+        
+        // Send DOWNLOAD_REQUEST to target client
+        const success = this.wsServer.sendToClient(targetClientId, {
+          type: 'DOWNLOAD_REQUEST',
+          requestId: requestId,
+          clientId: clientId,
+          filePath: filePath
+        });
+        
+        if (!success) {
+          logger.error(`Failed to send DOWNLOAD_REQUEST to client ${clientId}`);
+          this.wsServer.downloadManager.failDownload(requestId, new Error('Failed to contact client'));
+          return res.status(500).json({
+            success: false,
+            error: 'Failed to contact client'
+          });
+        }
+        
+        logger.info(`Download request ${requestId} sent to client ${clientId} for file: ${filePath}`);
+        
+        res.json({
+          success: true,
+          requestId: requestId,
+          status: 'pending',
+          message: 'Download request sent'
+        });
+        
+      } catch (error) {
+        logger.error(`Error creating download request:`, error);
+        res.status(500).json({
+          success: false,
+          error: 'Failed to create download request'
         });
       }
     });
