@@ -87,6 +87,74 @@ class ExpressServer {
       res.json(response);
     });
 
+    this.app.delete('/api/v1/downloads/:requestId', async (req, res) => {
+      const { requestId } = req.params;
+      const download = this.wsServer.downloadManager.getDownload(requestId);
+      
+      if (!download) {
+        return res.status(404).json({
+          success: false,
+          error: 'Download not found'
+        });
+      }
+      
+      if (download.status === 'completed' || download.status === 'failed' || download.status === 'cancelled') {
+        return res.status(409).json({
+          success: false,
+          error: `Cannot cancel ${download.status} download`
+        });
+      }
+      
+      try {
+        // Send CANCEL_DOWNLOAD to client
+        let targetClientId = null;
+        for (const [cid, client] of this.wsServer.clients.entries()) {
+          if (client.registeredId === download.clientId) {
+            targetClientId = cid;
+            break;
+          }
+        }
+        
+        if (targetClientId) {
+          this.wsServer.sendToClient(targetClientId, {
+            type: 'CANCEL_DOWNLOAD',
+            requestId: requestId,
+            fileId: download.filePath,
+            reason: 'Cancelled via API'
+          });
+        }
+        
+        // Update status to 'cancelled'
+        await this.wsServer.downloadManager.cancelDownload(requestId, 'Cancelled via API');
+        
+        // Clean up temp files
+        if (download.tempFilePath) {
+          const fs = require('fs');
+          if (fs.existsSync(download.tempFilePath)) {
+            try {
+              await fs.promises.unlink(download.tempFilePath);
+              logger.info(`Cleaned up temp file for cancelled download ${requestId}`);
+            } catch (error) {
+              logger.error(`Error cleaning up temp file for ${requestId}:`, error);
+            }
+          }
+        }
+        
+        res.json({
+          success: true,
+          requestId: requestId,
+          status: 'cancelled'
+        });
+        
+      } catch (error) {
+        logger.error(`Error cancelling download ${requestId}:`, error);
+        res.status(500).json({
+          success: false,
+          error: 'Internal server error'
+        });
+      }
+    });
+
     this.app.use((req, res) => {
       res.status(404).json({ error: 'Not found' });
     });
