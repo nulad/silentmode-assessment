@@ -285,10 +285,13 @@ class WebSocketServer {
     if (client && client.ws.readyState === WebSocket.OPEN) {
       try {
         client.ws.send(JSON.stringify(message));
+        return true;
       } catch (error) {
         logger.error(`Error sending message to ${clientId}:`, error);
+        return false;
       }
     }
+    return false;
   }
 
   sendError(clientId, code, message, details = {}) {

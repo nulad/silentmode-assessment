@@ -1,3 +1,8 @@
+// Set environment variables before any imports
+process.env.NODE_ENV = 'test';
+process.env.PORT = '3001'; // Use different port for tests
+process.env.WS_PORT = '8081';
+
 const request = require('supertest');
 const SilentModeServer = require('../index');
 
@@ -6,11 +11,6 @@ describe('POST /api/v1/downloads', () => {
   let app;
 
   beforeAll(async () => {
-    // Start server in test mode
-    process.env.NODE_ENV = 'test';
-    process.env.PORT = '3001'; // Use different port for tests
-    process.env.WS_PORT = '8081';
-    
     server = new SilentModeServer();
     await server.start();
     app = server.expressServer.app;

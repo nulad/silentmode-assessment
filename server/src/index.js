@@ -39,17 +39,21 @@ class SilentModeServer {
 
   shutdown() {
     logger.info('Shutting down SilentMode server...');
-    
+
     if (this.expressServer) {
       this.expressServer.stop();
     }
-    
+
     if (this.wsServer) {
       this.wsServer.stop();
     }
-    
+
     logger.info('Server shutdown complete');
-    process.exit(0);
+
+    // Don't exit in test mode
+    if (process.env.NODE_ENV !== 'test') {
+      process.exit(0);
+    }
   }
 }
 
