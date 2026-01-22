@@ -59,7 +59,7 @@ program
         
         const pollInterval = setInterval(async () => {
           try {
-            const statusResponse = await axios.get(`${serverUrl}/downloads/${requestId}`);
+            const statusResponse = await axios.get(`${serverUrl}/api/v1/downloads/${requestId}`);
             const download = statusResponse.data;
             
             if (!download.success) {
@@ -83,6 +83,7 @@ program
               console.log(`  Duration: ${download.duration}ms`);
               console.log(`  Size: ${(download.progress.bytesReceived / (1024 * 1024)).toFixed(2)} MB`);
               clearInterval(pollInterval);
+              process.exit(0);
             } else if (status === 'failed') {
               progressSpinner.fail(chalk.red('Download failed'));
               console.error(chalk.red(download.error));
@@ -91,6 +92,7 @@ program
             } else if (status === 'cancelled') {
               progressSpinner.warn(chalk.yellow('Download cancelled'));
               clearInterval(pollInterval);
+              process.exit(0);
             }
           } catch (error) {
             progressSpinner.fail('Error checking progress');
@@ -104,6 +106,7 @@ program
         setTimeout(() => {
           clearInterval(pollInterval);
           progressSpinner.warn(chalk.yellow(`\nDownload still in progress. Use:\n  silentmode downloads status ${requestId}\nto check status later.`));
+          process.exit(0);
         }, parseInt(options.timeout));
       } else {
         console.log(chalk.blue(`\nDownload started. Use:\n  silentmode downloads status ${requestId}\nto check status.`));
@@ -234,7 +237,7 @@ downloadsCmd
   .description('Get status of a specific download')
   .option('-w, --watch', 'Watch progress in real-time', false)
   .action(async (requestId, options) => {
-    const serverUrl = process.env.SERVER_URL || 'http://localhost:3001';
+    const serverUrl = process.env.SERVER_URL || 'http://localhost:3000';
     
     try {
       if (options.watch) {
@@ -249,7 +252,7 @@ downloadsCmd
         
         const pollInterval = setInterval(async () => {
           try {
-            const response = await axios.get(`${serverUrl}/downloads/${requestId}`);
+            const response = await axios.get(`${serverUrl}/api/v1/downloads/${requestId}`);
             const download = response.data;
             
             if (!download.success) {
@@ -279,6 +282,7 @@ downloadsCmd
                 console.log(`  Retry Success Rate: ${(download.retryStats.retrySuccessRate * 100).toFixed(1)}%`);
               }
               clearInterval(pollInterval);
+              process.exit(0);
             } else if (download.status === 'failed') {
               if (progressBarStarted) progressBar.stop();
               console.error(chalk.red('\n✗ Download failed'));
@@ -289,6 +293,7 @@ downloadsCmd
               if (progressBarStarted) progressBar.stop();
               console.log(chalk.yellow('\n⚠ Download cancelled'));
               clearInterval(pollInterval);
+              process.exit(0);
             }
           } catch (error) {
             if (progressBarStarted) progressBar.stop();
@@ -307,7 +312,7 @@ downloadsCmd
         
       } else {
         const spinner = ora('Fetching download status...').start();
-        const response = await axios.get(`${serverUrl}/downloads/${requestId}`);
+        const response = await axios.get(`${serverUrl}/api/v1/downloads/${requestId}`);
         
         spinner.stop();
         

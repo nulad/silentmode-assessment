@@ -24,6 +24,10 @@ LOG_FILE="logs/e2e-test-$(date +%Y%m%d-%H%M%S).log"
 mkdir -p "$DOWNLOADS_DIR"
 mkdir -p logs
 
+# Create test file in HOME directory for the client to serve
+mkdir -p "$HOME/data"
+echo "This is a test file for e2e testing" > "$HOME/data/file_to_download.txt"
+
 # Helper functions
 print_test() {
     echo -e "${BLUE}[TEST]${NC} $1"
@@ -49,7 +53,8 @@ TESTS_FAILED=0
 start_server() {
     print_info "Starting server..."
     cd server
-    npm start > ../logs/server-test.log 2>&1 &
+    # Start npm in its own process group using setsid
+    setsid npm start > ../logs/server-test.log 2>&1 &
     SERVER_PID=$!
     cd ..
 
@@ -81,7 +86,8 @@ start_client() {
     echo "LOG_LEVEL=info" >> client/.env
 
     cd client
-    npm start > ../logs/client-test.log 2>&1 &
+    # Start npm in its own process group using setsid
+    setsid npm start > ../logs/client-test.log 2>&1 &
     CLIENT_PID=$!
     cd ..
 
@@ -103,8 +109,10 @@ start_client() {
 stop_client() {
     if [ ! -z "$CLIENT_PID" ]; then
         print_info "Stopping client (PID: $CLIENT_PID)..."
-        kill $CLIENT_PID 2>/dev/null || true
+        # Kill the entire process group (negative PID)
+        kill -- -$CLIENT_PID 2>/dev/null || true
         wait $CLIENT_PID 2>/dev/null || true
+        sleep 1
         print_pass "Client stopped"
     fi
 }
@@ -113,20 +121,31 @@ stop_client() {
 stop_server() {
     if [ ! -z "$SERVER_PID" ]; then
         print_info "Stopping server (PID: $SERVER_PID)..."
-        kill $SERVER_PID 2>/dev/null || true
+        # Kill the entire process group (negative PID)
+        kill -- -$SERVER_PID 2>/dev/null || true
         wait $SERVER_PID 2>/dev/null || true
+        sleep 1
         print_pass "Server stopped"
     fi
 }
 
 # Cleanup function to stop both server and client
 cleanup() {
+    print_info "Cleaning up..."
     stop_client
     stop_server
+
     # Restore original client .env
     if [ -f client/.env.backup ]; then
         mv client/.env.backup client/.env
     fi
+
+    # Clean up test file
+    if [ -f "$HOME/data/file_to_download.txt" ]; then
+        rm "$HOME/data/file_to_download.txt"
+    fi
+
+    print_pass "Cleanup complete"
 }
 
 # Run a test case
@@ -147,33 +166,71 @@ run_test() {
     fi
 }
 
+# Wait for download to complete
+wait_for_download() {
+    local download_id="$1"
+    local timeout="${2:-30}"  # Default 30 seconds timeout
+    local elapsed=0
+
+    print_info "Waiting for download to complete (timeout: ${timeout}s)..."
+
+    while [ $elapsed -lt $timeout ]; do
+        STATUS_RESPONSE=$(curl -s "http://$SERVER_HOST:$SERVER_PORT/api/v1/downloads/$download_id")
+        STATUS=$(echo "$STATUS_RESPONSE" | grep -o '"status":"[^"]*' | cut -d'"' -f4)
+
+        if [ "$STATUS" = "completed" ]; then
+            print_pass "Download completed successfully"
+            return 0
+        elif [ "$STATUS" = "failed" ]; then
+            print_fail "Download failed"
+            echo "$STATUS_RESPONSE" >> "$LOG_FILE"
+            return 1
+        elif [ "$STATUS" = "cancelled" ]; then
+            print_fail "Download cancelled"
+            return 1
+        fi
+
+        # Show progress
+        PROGRESS=$(echo "$STATUS_RESPONSE" | grep -o '"percentage":[0-9.]*' | cut -d':' -f2)
+        if [ ! -z "$PROGRESS" ]; then
+            print_info "Download progress: ${PROGRESS}%"
+        fi
+
+        sleep 2
+        elapsed=$((elapsed + 2))
+    done
+
+    print_fail "Download timed out after ${timeout}s"
+    return 1
+}
+
 # Verify file integrity
 verify_file() {
     local original="$1"
     local downloaded="$2"
-    
+
     if [ ! -f "$downloaded" ]; then
         return 1
     fi
-    
+
     # Compare file sizes
     original_size=$(stat -c%s "$original")
     downloaded_size=$(stat -c%s "$downloaded")
-    
+
     if [ "$original_size" -ne "$downloaded_size" ]; then
         print_info "Size mismatch: original=$original_size, downloaded=$downloaded_size"
         return 1
     fi
-    
+
     # Compare checksums
     original_checksum=$(sha256sum "$original" | cut -d' ' -f1)
     downloaded_checksum=$(sha256sum "$downloaded" | cut -d' ' -f1)
-    
+
     if [ "$original_checksum" != "$downloaded_checksum" ]; then
         print_info "Checksum mismatch"
         return 1
     fi
-    
+
     return 0
 }
 
@@ -222,23 +279,29 @@ main() {
         print_pass "Download started (ID: $DOWNLOAD_ID)"
         ((TESTS_PASSED++))
 
-        # Wait a moment for download to process
-        sleep 2
-
-        # Test 5: Get Download Status
-        run_test "Get Download Status" "curl -f -s http://$SERVER_HOST:$SERVER_PORT/api/v1/downloads/$DOWNLOAD_ID"
-
-        # Test 6: List Downloads (With Data)
-        run_test "List Downloads (With Data)" "curl -f -s http://$SERVER_HOST:$SERVER_PORT/api/v1/downloads"
-
-        # Test 7: Check download progress
-        print_test "Check Download Progress"
-        PROGRESS_RESPONSE=$(curl -s "http://$SERVER_HOST:$SERVER_PORT/api/v1/downloads/$DOWNLOAD_ID")
-        if echo "$PROGRESS_RESPONSE" | grep -q '"success":true'; then
-            print_pass "Download progress retrieved"
+        # Test 5: Wait for Download to Complete
+        if wait_for_download "$DOWNLOAD_ID" 30; then
+            print_pass "Download completed"
             ((TESTS_PASSED++))
         else
-            print_fail "Failed to get download progress"
+            print_fail "Download did not complete"
+            ((TESTS_FAILED++))
+        fi
+
+        # Test 6: Get Download Status
+        run_test "Get Download Status" "curl -f -s http://$SERVER_HOST:$SERVER_PORT/api/v1/downloads/$DOWNLOAD_ID"
+
+        # Test 7: List Downloads (With Data)
+        run_test "List Downloads (With Data)" "curl -f -s http://$SERVER_HOST:$SERVER_PORT/api/v1/downloads"
+
+        # Test 8: Verify Download Status is 'completed'
+        print_test "Verify Download Status"
+        FINAL_STATUS=$(curl -s "http://$SERVER_HOST:$SERVER_PORT/api/v1/downloads/$DOWNLOAD_ID" | grep -o '"status":"[^"]*' | cut -d'"' -f4)
+        if [ "$FINAL_STATUS" = "completed" ]; then
+            print_pass "Download status is 'completed'"
+            ((TESTS_PASSED++))
+        else
+            print_fail "Download status is '$FINAL_STATUS', expected 'completed'"
             ((TESTS_FAILED++))
         fi
 
@@ -247,14 +310,14 @@ main() {
         ((TESTS_FAILED++))
     fi
     
-    # Test 8: Error Handling - Non-existent Download ID (valid UUID v4 format)
+    # Test 9: Error Handling - Non-existent Download ID (valid UUID v4 format)
     FAKE_UUID="12345678-1234-4234-a234-123456789012"
     run_test "Error Handling - Non-existent Download ID" "curl -s -w '%{http_code}' -o /dev/null http://$SERVER_HOST:$SERVER_PORT/api/v1/downloads/$FAKE_UUID | grep -q 404"
 
-    # Test 9: Error Handling - Invalid UUID Format
+    # Test 10: Error Handling - Invalid UUID Format
     run_test "Error Handling - Invalid UUID Format" "curl -s -w '%{http_code}' -o /dev/null http://$SERVER_HOST:$SERVER_PORT/api/v1/downloads/invalid-id | grep -q 400"
 
-    # Test 10: List Connected Clients
+    # Test 11: List Connected Clients
     print_test "List Connected Clients"
     CLIENTS_RESPONSE=$(curl -s "http://$SERVER_HOST:$SERVER_PORT/api/v1/clients")
     if echo "$CLIENTS_RESPONSE" | grep -q "$CLIENT_ID"; then
