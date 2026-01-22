@@ -181,12 +181,14 @@ class ExpressServer {
           totalChunks: download.totalChunks,
           percentage: download.progress,
           bytesReceived: download.chunksReceived * 1048576, // 1MB per chunk
-          retriedChunks: Array.from(download.failedChunks.entries()).map(([index, info]) => ({
-            chunkIndex: index,
-            attempts: info.attempts || 1,
-            lastRetryAt: info.lastRetryAt,
-            error: info.error
-          }))
+          retriedChunks: download.retriedChunks || []
+        },
+        retryStats: {
+          totalRetries: download.totalRetries || 0,
+          retriedChunks: download.retriedChunks || [],
+          retrySuccessRate: download.retriedChunks && download.retriedChunks.length > 0 
+            ? download.retriedChunks.filter(r => r.status === 'succeeded').length / download.retriedChunks.length 
+            : 0
         },
         startedAt: download.createdAt.toISOString()
       };

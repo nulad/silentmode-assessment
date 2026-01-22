@@ -71,14 +71,16 @@ describe('GET /api/v1/downloads/:requestId', () => {
     const testRequestId = 'test-req-failed';
     const downloadId = wsServer.downloadManager.createDownload('test-client', '/test/file.txt', testRequestId, 'requester-client');
     
-    // Simulate failed chunk
+    // Simulate failed chunk using new retry tracking
     const download = wsServer.downloadManager.getDownload(testRequestId);
-    download.failedChunks.set(5, {
-      error: 'Checksum validation failed',
-      timestamp: new Date(),
+    download.retriedChunks.push({
+      chunkIndex: 5,
       attempts: 2,
+      status: 'failed',
+      reason: 'CHECKSUM_FAILED',
       lastRetryAt: new Date()
     });
+    download.totalRetries = 1;
 
     const response = await request(app)
       .get(`/api/v1/downloads/${testRequestId}`)
@@ -88,9 +90,12 @@ describe('GET /api/v1/downloads/:requestId', () => {
     expect(response.body.progress.retriedChunks[0]).toMatchObject({
       chunkIndex: 5,
       attempts: 2,
-      error: 'Checksum validation failed'
+      status: 'failed',
+      reason: 'CHECKSUM_FAILED'
     });
     expect(response.body.progress.retriedChunks[0]).toHaveProperty('lastRetryAt');
+    expect(response.body.retryStats.totalRetries).toBe(1);
+    expect(response.body.retryStats.retrySuccessRate).toBe(0);
   });
 
   test('should include completion details for completed downloads', async () => {
