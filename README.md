@@ -41,9 +41,6 @@ A robust chunk-based file download system with WebSocket communication, automati
 git clone https://github.com/your-org/silentmode-assessment.git
 cd silentmode-assessment
 
-# Install dependencies
-npm install
-
 # Install server dependencies
 cd server
 npm install
@@ -55,55 +52,54 @@ npm install
 cd ..
 ```
 
-### Setup Script
-
-For automated setup, run:
-
-```bash
-chmod +x scripts/setup.sh
-./scripts/setup.sh
-```
-
-This will:
-- Install all dependencies
-- Create necessary directories
-- Generate test files
-- Set up environment configuration
-- Install git hooks (optional)
+**Note**: Make sure to install dependencies for both server and client directories separately. The root `package.json` only contains shared dependencies.
 
 ## Quick Start
 
-### 1. Start the Server
+### 1. Install Dependencies
+
+Make sure you've installed dependencies for both server and client:
 
 ```bash
-# From the root directory
-npm run server:start
+# Install server dependencies
+cd server
+npm install
+cd ..
 
-# Or directly
+# Install client dependencies
+cd client
+npm install
+cd ..
+```
+
+### 2. Start the Server
+
+```bash
+# Navigate to server directory and start
 cd server
 npm start
 ```
 
 The server will start on:
-- HTTP API: http://localhost:3001
-- WebSocket: ws://localhost:3002
+- HTTP API: http://localhost:3000
+- WebSocket: ws://localhost:8080
 
-### 2. Start a Client
+### 3. Start a Client
 
 ```bash
-# In a new terminal
+# In a new terminal, navigate to client directory
 cd client
 CLIENT_ID=my-client npm start
 ```
 
-### 3. Download a File
+### 4. Download a File
 
 ```bash
 # Using the CLI
 node server/cli.js download --clientId my-client --filePath /path/to/file.txt
 
 # Or via REST API
-curl -X POST http://localhost:3001/api/v1/downloads \
+curl -X POST http://localhost:3000/api/v1/downloads \
   -H "Content-Type: application/json" \
   -d '{"clientId":"my-client","filePath":"/path/to/file.txt"}'
 ```
@@ -145,7 +141,7 @@ curl -X POST http://localhost:3001/api/v1/downloads \
 ### Base URL
 
 ```
-http://localhost:3001/api/v1
+http://localhost:3000/api/v1
 ```
 
 ### Endpoints
@@ -209,14 +205,12 @@ GET    /downloads/{id}/chunks # Get chunk status
 }
 ```
 
-For full API documentation, see [docs/openapi.yaml](docs/openapi.yaml).
-
 ## WebSocket Protocol
 
 ### Connection
 
 ```javascript
-const ws = new WebSocket('ws://localhost:3002');
+const ws = new WebSocket('ws://localhost:8080');
 ```
 
 ### Message Types
@@ -265,8 +259,6 @@ const ws = new WebSocket('ws://localhost:3002');
   "checksum": "sha256-hash"
 }
 ```
-
-For full protocol documentation, see [docs/PROTOCOL.md](docs/PROTOCOL.md).
 
 ## CLI Usage
 
@@ -342,15 +334,15 @@ Create a `.env` file in the root directory:
 
 ```env
 # Server Configuration
-PORT=3001
-WS_PORT=3002
-SERVER_URL=http://localhost:3001
+PORT=3000
+WS_PORT=8080
+SERVER_URL=http://localhost:3000
 LOG_LEVEL=info
 
 # Client Configuration
 CLIENT_ID=test-client-123
 CLIENT_NAME=Test Client
-SERVER_WS_URL=ws://localhost:3002
+SERVER_WS_URL=ws://localhost:8080
 RECONNECT_INTERVAL=5000
 MAX_RECONNECT_ATTEMPTS=10
 HEARTBEAT_INTERVAL=30000
@@ -367,8 +359,8 @@ DOWNLOAD_TIMEOUT=300000
 Create `server/.env`:
 
 ```env
-PORT=3001
-WS_PORT=3002
+PORT=3000
+WS_PORT=8080
 DOWNLOAD_DIR=./downloads
 LOG_LEVEL=info
 ```
@@ -380,7 +372,7 @@ Create `client/.env`:
 ```env
 CLIENT_ID=my-client
 CLIENT_NAME=My Client
-SERVER_WS_URL=ws://localhost:3002
+SERVER_WS_URL=ws://localhost:8080
 ```
 
 ## Testing
@@ -388,48 +380,29 @@ SERVER_WS_URL=ws://localhost:3002
 ### Unit Tests
 
 ```bash
-# Run all tests
+# Run server tests
+cd server
 npm test
 
-# Run server tests
-cd server && npm test
-
-# Run client tests
-cd client && npm test
+# Run client tests (if available)
+cd client
+npm test
 ```
 
-### Integration Tests
+### Manual Testing
+
+Various test files are available in the server directory:
+- `test-download.js` - Basic download test
+- `test-heartbeat.js` - Heartbeat mechanism test
+- `test-retry-*.js` - Retry functionality tests
+- `rest-api.test.js` - REST API tests
+
+Run individual tests:
 
 ```bash
-# Run integration tests
-npm run test:integration
-```
-
-### End-to-End Tests
-
-```bash
-# Run E2E test suite
-./scripts/e2e-test.sh
-```
-
-### Retry Scenario Tests
-
-```bash
-# Test retry functionality
-./scripts/test-retry.sh
-```
-
-### Generate Test Files
-
-```bash
-# Generate test files
-chmod +x scripts/generate-test-files.js
-
-# Generate 100MB random file
-node scripts/generate-test-files.js test-100mb.dat 100
-
-# Generate full test suite
-node scripts/generate-test-files.js
+cd server
+node test-download.js
+node test-heartbeat.js
 ```
 
 ## Development
@@ -441,37 +414,30 @@ silentmode-assessment/
 ├── client/                 # Client application
 │   ├── src/               # Client source code
 │   ├── data/              # Test data files
+│   ├── logs/              # Client logs
 │   └── package.json
 ├── server/                # Server application
 │   ├── src/               # Server source code
 │   ├── cli.js             # CLI tool
+│   ├── logs/              # Server logs
+│   ├── downloads/         # Download directory
+│   ├── test-*.js          # Test files
 │   └── package.json
-├── scripts/               # Utility scripts
-│   ├── setup.sh           # Setup script
-│   ├── e2e-test.sh        # E2E tests
-│   ├── test-retry.sh      # Retry tests
-│   └── generate-test-files.js
-├── docs/                  # Documentation
-│   ├── ARCHITECTURE.md    # Architecture docs
-│   ├── PROTOCOL.md        # Protocol specification
-│   └── openapi.yaml       # OpenAPI spec
 ├── shared/                # Shared code
 │   └── protocol/          # Protocol definitions
-├── downloads/             # Download directory
 └── README.md
 ```
 
 ### Running in Development
 
 ```bash
-# Start server in development mode
-npm run dev:server
+# Start server
+cd server
+npm start
 
-# Start client in development mode
-npm run dev:client
-
-# Start both with watch mode
-npm run dev
+# Start client (in a new terminal)
+cd client
+npm start
 ```
 
 ### Logging
@@ -522,11 +488,31 @@ The retry mechanism uses:
 
 ### Common Issues
 
+#### Missing Dependencies
+
+If you encounter "Cannot find module" errors:
+
+```bash
+# Reinstall server dependencies
+cd server
+npm install
+cd ..
+
+# Reinstall client dependencies
+cd client
+npm install
+cd ..
+```
+
+Common missing packages:
+- `express-validator` - Install with: `cd server && npm install express-validator`
+- `ws` - Install with: `npm install ws` (in root, server, or client as needed)
+
 #### Server Won't Start
 
 ```bash
 # Check if ports are in use
-netstat -tlnp | grep -E ":(3001|3002)"
+netstat -tlnp | grep -E ":(3000|8080)"
 
 # Kill existing processes
 pkill -f "node server"
@@ -567,7 +553,7 @@ Monitor system health:
 
 ```bash
 # Server health
-curl http://localhost:3001/api/v1/health
+curl http://localhost:3000/api/v1/health
 
 # Client status
 node server/cli.js clients list
@@ -597,9 +583,9 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 For support and questions:
 
-- Create an issue on GitHub
-- Email: support@example.com
-- Documentation: [docs/](docs/)
+- Check the README and inline code documentation
+- Review test files for usage examples
+- Check server and client logs for debugging
 
 ## Changelog
 

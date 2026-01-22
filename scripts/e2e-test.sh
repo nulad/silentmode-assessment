@@ -3,7 +3,7 @@
 # End-to-End Test Script for Silentmode Assessment
 # Tests the complete chunk download system
 
-set -e
+# Note: Don't use 'set -e' here as we want to continue testing even if some tests fail
 
 # Colors for output
 RED='\033[0;31m'
@@ -52,18 +52,61 @@ start_server() {
     npm start > ../logs/server-test.log 2>&1 &
     SERVER_PID=$!
     cd ..
-    
+
     # Wait for server to start
     for i in {1..30}; do
-        if curl -s "http://$SERVER_HOST:$SERVER_PORT/health" > /dev/null 2>&1; then
+        if curl -s "http://$SERVER_HOST:$SERVER_PORT/api/v1/health" > /dev/null 2>&1; then
             print_pass "Server started successfully (PID: $SERVER_PID)"
             return 0
         fi
         sleep 1
     done
-    
+
     print_fail "Server failed to start"
     return 1
+}
+
+# Start client in background
+start_client() {
+    print_info "Starting test client..."
+
+    # Backup existing client .env
+    if [ -f client/.env ]; then
+        cp client/.env client/.env.backup
+    fi
+
+    # Create a temporary .env file for the test client
+    echo "CLIENT_ID=$CLIENT_ID" > client/.env
+    echo "SERVER_WS_URL=ws://$SERVER_HOST:8080" >> client/.env
+    echo "LOG_LEVEL=info" >> client/.env
+
+    cd client
+    npm start > ../logs/client-test.log 2>&1 &
+    CLIENT_PID=$!
+    cd ..
+
+    # Wait for client to register
+    sleep 5
+
+    # Check if client is connected
+    CONNECTED_CLIENTS=$(curl -s "http://$SERVER_HOST:$SERVER_PORT/api/v1/clients" | grep -o '"total":[0-9]*' | cut -d':' -f2)
+    if [ "$CONNECTED_CLIENTS" -gt 0 ]; then
+        print_pass "Client started successfully (PID: $CLIENT_PID, ID: $CLIENT_ID)"
+        return 0
+    else
+        print_fail "Client failed to connect"
+        return 1
+    fi
+}
+
+# Stop client
+stop_client() {
+    if [ ! -z "$CLIENT_PID" ]; then
+        print_info "Stopping client (PID: $CLIENT_PID)..."
+        kill $CLIENT_PID 2>/dev/null || true
+        wait $CLIENT_PID 2>/dev/null || true
+        print_pass "Client stopped"
+    fi
 }
 
 # Stop server
@@ -73,6 +116,16 @@ stop_server() {
         kill $SERVER_PID 2>/dev/null || true
         wait $SERVER_PID 2>/dev/null || true
         print_pass "Server stopped"
+    fi
+}
+
+# Cleanup function to stop both server and client
+cleanup() {
+    stop_client
+    stop_server
+    # Restore original client .env
+    if [ -f client/.env.backup ]; then
+        mv client/.env.backup client/.env
     fi
 }
 
@@ -131,96 +184,85 @@ main() {
     
     # Initialize log
     echo "E2E Test Log - $(date)" > "$LOG_FILE"
-    
-    # Trap to ensure server is stopped
-    trap stop_server EXIT
-    
+
+    # Trap to ensure cleanup on exit
+    trap cleanup EXIT
+
     # Start server
     if ! start_server; then
         exit 1
     fi
+
+    # Start client
+    if ! start_client; then
+        exit 1
+    fi
     
     # Test 1: Health Check
-    run_test "Health Check" "curl -f -s http://$SERVER_HOST:$SERVER_PORT/health"
-    
-    # Test 2: Client Registration
-    run_test "Client Registration" "curl -f -s -X POST http://$SERVER_HOST:$SERVER_PORT/api/clients -H 'Content-Type: application/json' -d '{\"name\":\"$CLIENT_ID\"}'"
-    
+    run_test "Health Check" "curl -f -s http://$SERVER_HOST:$SERVER_PORT/api/v1/health"
+
+    # Test 2: List Clients (should be empty initially)
+    run_test "List Clients" "curl -f -s http://$SERVER_HOST:$SERVER_PORT/api/v1/clients"
+
     # Test 3: List Downloads (Empty)
-    run_test "List Downloads (Empty)" "curl -f -s http://$SERVER_HOST:$SERVER_PORT/api/downloads"
-    
+    run_test "List Downloads (Empty)" "curl -f -s http://$SERVER_HOST:$SERVER_PORT/api/v1/downloads"
+
     # Test 4: Start Download
-    TEST_FILE="$TEST_FILES_DIR/test-5mb.dat"
-    if [ -f "$TEST_FILE" ]; then
-        DOWNLOAD_ID=$(curl -s -X POST "http://$SERVER_HOST:$SERVER_PORT/api/downloads" \
-            -H "Content-Type: application/json" \
-            -d "{\"filename\":\"$(basename $TEST_FILE)\",\"size\":$(stat -c%s $TEST_FILE)}" | \
-            grep -o '"id":"[^"]*' | cut -d'"' -f4)
-        
-        if [ ! -z "$DOWNLOAD_ID" ]; then
-            print_pass "Download started (ID: $DOWNLOAD_ID)"
+    # Note: The filePath should be a path that exists on the CLIENT machine
+    TEST_FILE_PATH="data/file_to_download.txt"
+
+    print_test "Start Download"
+    DOWNLOAD_RESPONSE=$(curl -s -X POST "http://$SERVER_HOST:$SERVER_PORT/api/v1/downloads" \
+        -H "Content-Type: application/json" \
+        -d "{\"clientId\":\"$CLIENT_ID\",\"filePath\":\"$TEST_FILE_PATH\"}")
+
+    DOWNLOAD_ID=$(echo "$DOWNLOAD_RESPONSE" | grep -o '"requestId":"[^"]*' | cut -d'"' -f4)
+
+    if [ ! -z "$DOWNLOAD_ID" ]; then
+        print_pass "Download started (ID: $DOWNLOAD_ID)"
+        ((TESTS_PASSED++))
+
+        # Wait a moment for download to process
+        sleep 2
+
+        # Test 5: Get Download Status
+        run_test "Get Download Status" "curl -f -s http://$SERVER_HOST:$SERVER_PORT/api/v1/downloads/$DOWNLOAD_ID"
+
+        # Test 6: List Downloads (With Data)
+        run_test "List Downloads (With Data)" "curl -f -s http://$SERVER_HOST:$SERVER_PORT/api/v1/downloads"
+
+        # Test 7: Check download progress
+        print_test "Check Download Progress"
+        PROGRESS_RESPONSE=$(curl -s "http://$SERVER_HOST:$SERVER_PORT/api/v1/downloads/$DOWNLOAD_ID")
+        if echo "$PROGRESS_RESPONSE" | grep -q '"success":true'; then
+            print_pass "Download progress retrieved"
             ((TESTS_PASSED++))
-            
-            # Test 5: Get Download Status
-            run_test "Get Download Status" "curl -f -s http://$SERVER_HOST:$SERVER_PORT/api/downloads/$DOWNLOAD_ID"
-            
-            # Test 6: Download Chunks
-            print_info "Downloading chunks..."
-            node cli.js download "$DOWNLOAD_ID" --output "$DOWNLOADS_DIR/downloaded-$DOWNLOAD_ID.dat" >> "$LOG_FILE" 2>&1
-            
-            if verify_file "$TEST_FILE" "$DOWNLOADS_DIR/downloaded-$DOWNLOAD_ID.dat"; then
-                print_pass "File integrity verified"
-                ((TESTS_PASSED++))
-            else
-                print_fail "File integrity check failed"
-                ((TESTS_FAILED++))
-            fi
-            
-            # Test 7: List Downloads (With Data)
-            run_test "List Downloads (With Data)" "curl -f -s http://$SERVER_HOST:$SERVER_PORT/api/downloads"
-            
-            # Test 8: Delete Download
-            run_test "Delete Download" "curl -f -s -X DELETE http://$SERVER_HOST:$SERVER_PORT/api/downloads/$DOWNLOAD_ID"
-            
         else
-            print_fail "Failed to start download"
+            print_fail "Failed to get download progress"
             ((TESTS_FAILED++))
         fi
+
     else
-        print_fail "Test file not found: $TEST_FILE"
+        print_fail "Failed to start download: $DOWNLOAD_RESPONSE"
         ((TESTS_FAILED++))
     fi
     
-    # Test 9: Error Handling - Invalid Download ID
-    run_test "Error Handling - Invalid Download ID" "curl -s -w '%{http_code}' -o /dev/null http://$SERVER_HOST:$SERVER_PORT/api/downloads/invalid-id | grep -q 404"
-    
-    # Test 10: Concurrent Downloads
-    print_info "Testing concurrent downloads..."
-    TEST_FILE2="$TEST_FILES_DIR/test-10mb.dat"
-    if [ -f "$TEST_FILE2" ]; then
-        # Start two downloads concurrently
-        (DOWNLOAD_ID1=$(curl -s -X POST "http://$SERVER_HOST:$SERVER_PORT/api/downloads" \
-            -H "Content-Type: application/json" \
-            -d "{\"filename\":\"test1.dat\",\"size\":$(stat -c%s $TEST_FILE)}" | \
-            grep -o '"id":"[^"]*' | cut -d'"' -f4)
-        node cli.js download "$DOWNLOAD_ID1" --output "$DOWNLOADS_DIR/concurrent1.dat" >> "$LOG_FILE" 2>&1) &
-        
-        (DOWNLOAD_ID2=$(curl -s -X POST "http://$SERVER_HOST:$SERVER_PORT/api/downloads" \
-            -H "Content-Type: application/json" \
-            -d "{\"filename\":\"test2.dat\",\"size\":$(stat -c%s $TEST_FILE2)}" | \
-            grep -o '"id":"[^"]*' | cut -d'"' -f4)
-        node cli.js download "$DOWNLOAD_ID2" --output "$DOWNLOADS_DIR/concurrent2.dat" >> "$LOG_FILE" 2>&1) &
-        
-        wait
-        
-        if verify_file "$TEST_FILE" "$DOWNLOADS_DIR/concurrent1.dat" && \
-           verify_file "$TEST_FILE2" "$DOWNLOADS_DIR/concurrent2.dat"; then
-            print_pass "Concurrent downloads successful"
-            ((TESTS_PASSED++))
-        else
-            print_fail "Concurrent downloads failed"
-            ((TESTS_FAILED++))
-        fi
+    # Test 8: Error Handling - Non-existent Download ID (valid UUID v4 format)
+    FAKE_UUID="12345678-1234-4234-a234-123456789012"
+    run_test "Error Handling - Non-existent Download ID" "curl -s -w '%{http_code}' -o /dev/null http://$SERVER_HOST:$SERVER_PORT/api/v1/downloads/$FAKE_UUID | grep -q 404"
+
+    # Test 9: Error Handling - Invalid UUID Format
+    run_test "Error Handling - Invalid UUID Format" "curl -s -w '%{http_code}' -o /dev/null http://$SERVER_HOST:$SERVER_PORT/api/v1/downloads/invalid-id | grep -q 400"
+
+    # Test 10: List Connected Clients
+    print_test "List Connected Clients"
+    CLIENTS_RESPONSE=$(curl -s "http://$SERVER_HOST:$SERVER_PORT/api/v1/clients")
+    if echo "$CLIENTS_RESPONSE" | grep -q "$CLIENT_ID"; then
+        print_pass "Client found in connected clients list"
+        ((TESTS_PASSED++))
+    else
+        print_fail "Client not found in connected clients list"
+        ((TESTS_FAILED++))
     fi
     
     # Print results

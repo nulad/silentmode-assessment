@@ -102,53 +102,32 @@ class ExpressServer {
     this.app.get('/api/v1/downloads/:requestId', validateGetDownload, (req, res) => {
       const { requestId } = req.params;
       const download = this.wsServer.downloadManager.getDownload(requestId);
-      
+
       if (!download) {
         return res.status(404).json({
           success: false,
-          error: 'Client not found or not connected'
+          error: 'Download not found'
         });
       }
 
-      // Generate request ID
-      const requestId = uuidv4();
-
-      try {
-        // Create download request
-        const downloadRequest = {
-          type: 'DOWNLOAD_REQUEST',
-          requestId,
-          url,
-          filename,
-          chunks: chunks || 0, // 0 means let client decide
-          timestamp: new Date().toISOString()
-        };
-
-        // Send request to client
-        client.send(JSON.stringify(downloadRequest));
-        logger.info(`Sent download request ${requestId} to client ${clientId}`);
-
-        // Initialize download in download manager
-        this.wsServer.downloadManager.createDownload(requestId, clientId, {
-          url,
-          filename,
-          totalChunks: chunks
-        });
-
-        res.status(202).json({
-          success: true,
-          requestId,
-          status: 'pending',
-          message: 'Download request sent to client'
-        });
-
-      } catch (error) {
-        logger.error('Error initiating download:', error);
-        res.status(500).json({
-          success: false,
-          error: 'Failed to initiate download'
-        });
-      }
+      res.json({
+        success: true,
+        requestId: download.id,
+        clientId: download.clientId,
+        status: download.status,
+        progress: {
+          chunksReceived: download.chunksReceived,
+          totalChunks: download.totalChunks,
+          percentage: download.totalChunks ? (download.chunksReceived / download.totalChunks * 100).toFixed(2) : 0,
+          bytesReceived: download.bytesReceived || 0,
+          retriedChunks: download.retriedChunks || []
+        },
+        retryStats: download.retryStats || {
+          totalRetries: 0,
+          retriedChunks: [],
+          retrySuccessRate: 0
+        }
+      });
     });
 
     // GET /api/v1/downloads - List all downloads
@@ -234,7 +213,7 @@ class ExpressServer {
       }
     });
 
-    this.app.delete('/api/v1/downloads/:requestId', validateDeleteDownload, async (req, res) => {
+    this.app.delete('/api/v1/downloads/:requestId', validateDeleteDownload, asyncHandler(async (req, res) => {
       const { requestId } = req.params;
       const download = this.wsServer.downloadManager.getDownload(requestId);
 
@@ -246,7 +225,7 @@ class ExpressServer {
       if (download.status === 'completed' || download.status === 'failed') {
         throw new AppError(ERROR_CODES.INVALID_REQUEST, 'Cannot cancel completed download');
       }
-      
+
       // Send CANCEL_DOWNLOAD message to client
       const client = this.wsServer.clients.get(download.clientId);
       if (client && client.readyState === 1) { // WebSocket.OPEN
