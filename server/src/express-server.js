@@ -39,13 +39,16 @@ class ExpressServer {
       }
       
       // Check if client is connected
-      const client = this.wsServer.clients.get(clientId);
+      logger.debug(`Looking for client: ${clientId}`);
+      const client = this.wsServer.findClientByRegisteredId(clientId);
       if (!client) {
+        logger.warn(`Client not found: ${clientId}`);
         return res.status(404).json({
           success: false,
           error: 'Client not connected'
         });
       }
+      logger.debug(`Client found: ${client.registeredId}`);
       
       try {
         // Create download request
