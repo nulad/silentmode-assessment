@@ -1,11 +1,13 @@
 require('dotenv').config();
 const logger = require('./utils/logger');
 const WebSocketServer = require('./websocket-server');
+const ExpressServer = require('./express-server');
 const config = require('./config');
 
 class SilentModeServer {
   constructor() {
     this.wsServer = new WebSocketServer();
+    this.expressServer = new ExpressServer(this.wsServer);
   }
 
   async start() {
@@ -18,8 +20,12 @@ class SilentModeServer {
       // Start heartbeat for WebSocket connections
       this.wsServer.startHeartbeat();
 
+      // Start Express server
+      await this.expressServer.start();
+
       logger.info(`SilentMode server started successfully`);
       logger.info(`WebSocket server listening on port ${config.WS_PORT}`);
+      logger.info(`Express server listening on port ${config.PORT}`);
       
       // Handle graceful shutdown
       process.on('SIGINT', () => this.shutdown());
@@ -33,6 +39,10 @@ class SilentModeServer {
 
   shutdown() {
     logger.info('Shutting down SilentMode server...');
+    
+    if (this.expressServer) {
+      this.expressServer.stop();
+    }
     
     if (this.wsServer) {
       this.wsServer.stop();
