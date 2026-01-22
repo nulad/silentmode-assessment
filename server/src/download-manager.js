@@ -534,10 +534,16 @@ class DownloadManager {
     
     if (existingEntry) {
       // Update existing entry
+      const oldAttempts = existingEntry.attempts;
       existingEntry.attempts = attempt;
       existingEntry.status = status;
       existingEntry.reason = reason || existingEntry.reason;
       existingEntry.lastRetryAt = new Date();
+      
+      // Update total retries based on the increase in attempts
+      if (attempt > oldAttempts) {
+        download.totalRetries += (attempt - oldAttempts);
+      }
     } else {
       // Add new retry entry
       download.retriedChunks.push({

@@ -66,19 +66,14 @@ async function testRetryStatistics() {
   downloadManager.updateRetryTracking(requestId, failedChunkIndex, 2, 'failed', 'CHECKSUM_FAILED');
   chunkManager.markChunkFailed(requestId, failedChunkIndex, 'CHECKSUM_FAILED');
   
-  // Third attempt succeeds
+  // Third attempt succeeds - update with final attempt count
   console.log(`Chunk ${failedChunkIndex} attempt 3: succeeds`);
   const download = downloadManager.getDownload(requestId);
   download.receivedChunkIndices.add(failedChunkIndex);
   chunkManager.markChunkReceived(requestId, failedChunkIndex);
   
-  // Update retry tracking to mark as succeeded
-  const retryEntry = download.retriedChunks.find(r => r.chunkIndex === failedChunkIndex);
-  if (retryEntry) {
-    retryEntry.status = 'succeeded';
-    retryEntry.attempts = 3;
-    retryEntry.lastRetryAt = new Date();
-  }
+  // Update retry tracking to mark as succeeded with final attempt count
+  downloadManager.updateRetryTracking(requestId, failedChunkIndex, 3, 'succeeded', 'CHECKSUM_FAILED');
   
   downloadManager.updateDownload(requestId, {
     chunksReceived: download.receivedChunkIndices.size
