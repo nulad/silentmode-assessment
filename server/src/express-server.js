@@ -44,6 +44,49 @@ class ExpressServer {
       });
     });
 
+    this.app.get('/api/v1/downloads/:requestId', (req, res) => {
+      const { requestId } = req.params;
+      const download = this.wsServer.downloadManager.getDownload(requestId);
+      
+      if (!download) {
+        return res.status(404).json({
+          success: false,
+          error: 'Download not found'
+        });
+      }
+      
+      const response = {
+        success: true,
+        requestId: download.id,
+        clientId: download.clientId,
+        status: download.status,
+        progress: {
+          chunksReceived: download.chunksReceived,
+          totalChunks: download.totalChunks,
+          percentage: download.progress,
+          bytesReceived: download.chunksReceived * 1048576, // 1MB per chunk
+          retriedChunks: Array.from(download.failedChunks.entries()).map(([index, info]) => ({
+            chunkIndex: index,
+            attempts: info.attempts || 1,
+            lastRetryAt: info.lastRetryAt,
+            error: info.error
+          }))
+        },
+        startedAt: download.createdAt.toISOString()
+      };
+      
+      if (download.completedAt) {
+        response.completedAt = download.completedAt.toISOString();
+        response.duration = download.duration;
+      }
+      
+      if (download.error) {
+        response.error = download.error;
+      }
+      
+      res.json(response);
+    });
+
     this.app.use((req, res) => {
       res.status(404).json({ error: 'Not found' });
     });
