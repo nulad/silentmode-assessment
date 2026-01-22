@@ -119,6 +119,20 @@ class WebSocketServer {
     }
   }
 
+  findClientByRegisteredId(registeredId) {
+    logger.debug(`Looking for client with registered ID: ${registeredId}`);
+    logger.debug(`Connected clients: ${Array.from(this.clients.entries()).map(([id, client]) => `${id} -> ${client.registeredId}`).join(', ')}`);
+    
+    for (const [clientId, client] of this.clients.entries()) {
+      if (client.registeredId === registeredId) {
+        logger.debug(`Found client: ${clientId}`);
+        return client;
+      }
+    }
+    logger.debug(`Client not found`);
+    return null;
+  }
+
   handleRegister(clientId, message) {
     logger.info(`Registering client: ${message.clientId}`);
     
