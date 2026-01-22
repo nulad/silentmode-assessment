@@ -11,6 +11,7 @@ class WebSocketClient {
     this.connected = false;
     this.reconnectAttempts = 0;
     this.fileHandler = new FileHandler();
+    this.activeDownloads = new Map();
   }
 
   async start() {
@@ -114,6 +115,13 @@ class WebSocketClient {
       // Check if file exists and get info
       const fileInfo = await this.fileHandler.getFileInfo(message.filePath);
       
+      // Track this download for retry support
+      this.activeDownloads.set(message.requestId, {
+        filePath: message.filePath,
+        totalChunks: fileInfo.totalChunks,
+        fileChecksum: fileInfo.checksum
+      });
+      
       // Send success ACK
       this.send({
         type: MESSAGE_TYPES.DOWNLOAD_ACK,
@@ -197,6 +205,9 @@ class WebSocketClient {
       
       logger.info(`Completed sending file ${filePath} (ID: ${fileId})`);
       
+      // Clean up active download tracking after completion
+      this.activeDownloads.delete(fileId);
+      
     } catch (error) {
       logger.error(`Error sending file chunks: ${error.message}`);
       
@@ -207,17 +218,75 @@ class WebSocketClient {
         message: `File transfer failed: ${error.message}`,
         details: { requestId: fileId }
       });
+      
+      // Clean up active download tracking on error
+      this.activeDownloads.delete(fileId);
     }
   }
 
-  handleRetryChunk(message) {
-    logger.info(`Retry request for chunk ${message.chunkIndex} of file ${message.requestId}`);
-    // Will be implemented in retry logic task
+  async handleRetryChunk(message) {
+    const { requestId, chunkIndex, attempt, reason } = message;
+    
+    logger.info(`Retrying chunk ${chunkIndex}, attempt ${attempt} (reason: ${reason})`);
+    
+    try {
+      // Get the active download info
+      const download = this.activeDownloads.get(requestId);
+      
+      if (!download) {
+        logger.error(`Cannot retry chunk: download ${requestId} not found in active downloads`);
+        return;
+      }
+      
+      const { filePath, totalChunks } = download;
+      
+      // Validate chunk index
+      if (chunkIndex < 0 || chunkIndex >= totalChunks) {
+        logger.error(`Invalid chunk index ${chunkIndex} for file with ${totalChunks} chunks`);
+        return;
+      }
+      
+      // Re-read the specific chunk from file
+      const chunkData = await this.fileHandler.readChunk(filePath, chunkIndex);
+      
+      // Calculate fresh checksum
+      const checksum = await this.fileHandler.calculateChunkChecksum(filePath, chunkIndex);
+      
+      // Convert to base64
+      const base64Data = chunkData.toString('base64');
+      
+      // Re-send as FILE_CHUNK
+      this.send({
+        type: MESSAGE_TYPES.FILE_CHUNK,
+        requestId: requestId,
+        chunkIndex: chunkIndex,
+        totalChunks: totalChunks,
+        data: base64Data,
+        checksum: checksum,
+        size: chunkData.length,
+        timestamp: new Date().toISOString()
+      });
+      
+      logger.info(`Successfully retried chunk ${chunkIndex} for request ${requestId}`);
+      
+    } catch (error) {
+      logger.error(`Error retrying chunk ${chunkIndex}: ${error.message}`);
+      
+      // Send ERROR message
+      this.send({
+        type: MESSAGE_TYPES.ERROR,
+        code: 'CHUNK_RETRY_FAILED',
+        message: `Failed to retry chunk ${chunkIndex}: ${error.message}`,
+        details: { requestId, chunkIndex }
+      });
+    }
   }
 
   handleCancelDownload(message) {
     logger.info(`Download cancelled for file ${message.requestId}: ${message.reason}`);
-    // Will be implemented in file transfer task
+    
+    // Clean up active download tracking
+    this.activeDownloads.delete(message.requestId);
   }
 
   handlePing() {
