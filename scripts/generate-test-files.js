@@ -78,13 +78,15 @@ class TestFileGenerator {
                         }
                     }
                     
-                    if (!writeStream.write(chunk)) {
+                    const canContinue = writeStream.write(chunk);
+
+                    bytesWritten += chunkBytes;
+                    chunkNumber++;
+
+                    if (!canContinue) {
                         writeStream.once('drain', writeChunk);
                         return;
                     }
-                    
-                    bytesWritten += chunkBytes;
-                    chunkNumber++;
                     
                     // Progress indicator
                     if (chunkNumber % 10 === 0) {
