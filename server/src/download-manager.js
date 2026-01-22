@@ -548,10 +548,8 @@ class DownloadManager {
         lastRetryAt: new Date()
       });
       
-      // Increment total retries counter for each attempt after the first
-      if (attempt > 1) {
-        download.totalRetries++;
-      }
+      // Increment total retries counter for each retry attempt (attempts - 1)
+      download.totalRetries += (attempt - 1);
     }
 
     // Also update failedChunks for backward compatibility
