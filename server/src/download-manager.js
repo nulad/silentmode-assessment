@@ -436,6 +436,18 @@ class DownloadManager {
       }
     }
 
+    // Clean up temp file
+    if (download && download.tempFilePath) {
+      try {
+        if (fs.existsSync(download.tempFilePath)) {
+          await fs.promises.unlink(download.tempFilePath);
+          logger.debug(`Cleaned up temp file for cancelled download ${requestId}`);
+        }
+      } catch (error) {
+        logger.error(`Error cleaning up temp file for ${requestId}:`, error);
+      }
+    }
+
     this.updateDownload(requestId, {
       status: 'cancelled',
       error: {

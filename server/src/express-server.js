@@ -87,6 +87,66 @@ class ExpressServer {
       res.json(response);
     });
 
+    this.app.delete('/api/v1/downloads/:requestId', async (req, res) => {
+      const { requestId } = req.params;
+      const download = this.wsServer.downloadManager.getDownload(requestId);
+      
+      if (!download) {
+        return res.status(404).json({
+          success: false,
+          error: 'Download not found'
+        });
+      }
+      
+      // Check if download is already completed
+      if (download.status === 'completed' || download.status === 'failed') {
+        return res.status(409).json({
+          success: false,
+          error: 'Cannot cancel completed download'
+        });
+      }
+      
+      // Find the client handling the download
+      let targetClientId = null;
+      for (const [cid, client] of this.wsServer.clients.entries()) {
+        if (client.registeredId === download.clientId) {
+          targetClientId = cid;
+          break;
+        }
+      }
+      
+      if (targetClientId) {
+        // Send CANCEL_DOWNLOAD to client
+        this.wsServer.sendToClient(targetClientId, {
+          type: 'CANCEL_DOWNLOAD',
+          requestId: requestId,
+          fileId: download.filePath,
+          reason: 'Download cancelled by API request'
+        });
+      }
+      
+      // Update status to cancelled
+      await this.wsServer.downloadManager.cancelDownload(requestId, 'Download cancelled by API request');
+      
+      // Clean up temp files
+      if (download.tempFilePath) {
+        try {
+          const fs = require('fs');
+          if (fs.existsSync(download.tempFilePath)) {
+            await fs.promises.unlink(download.tempFilePath);
+          }
+        } catch (error) {
+          logger.error(`Error cleaning up temp file for ${requestId}:`, error);
+        }
+      }
+      
+      res.json({
+        success: true,
+        requestId: requestId,
+        status: 'cancelled'
+      });
+    });
+
     this.app.use((req, res) => {
       res.status(404).json({ error: 'Not found' });
     });
