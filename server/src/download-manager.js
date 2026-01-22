@@ -187,8 +187,20 @@ class DownloadManager {
       // Update retry tracking to mark as succeeded if this chunk was previously retried
       const retryEntry = download.retriedChunks.find(r => r.chunkIndex === chunk.chunkIndex);
       if (retryEntry) {
-        retryEntry.status = 'succeeded';
-        retryEntry.lastRetryAt = new Date();
+        // Get the current attempt count from failedChunks or retry entry
+        const failedInfo = download.failedChunks.get(chunk.chunkIndex);
+        let attemptCount = failedInfo ? failedInfo.attempts : retryEntry.attempts;
+        
+        // If this chunk was previously failed, this successful attempt is the next one
+        if (failedInfo) {
+          attemptCount = attemptCount + 1;
+        }
+        
+        // Properly update retry tracking with success
+        this.updateRetryTracking(requestId, chunk.chunkIndex, attemptCount, 'succeeded', retryEntry.reason);
+        
+        // Clear from failedChunks since it succeeded
+        download.failedChunks.delete(chunk.chunkIndex);
       }
 
       // Step 5: Update download progress
@@ -542,7 +554,22 @@ class DownloadManager {
       
       // Update total retries based on the increase in attempts
       if (attempt > oldAttempts) {
-        download.totalRetries += (attempt - oldAttempts);
+        const increment = attempt - oldAttempts;
+        download.totalRetries += increment;
+      }
+      
+      // For successful retries, ensure we count all retry attempts
+      if (status === 'succeeded' && attempt > 1) {
+        // Ensure totalRetries reflects the final number of retries (attempts - 1)
+        const expectedRetries = attempt - 1;
+        const currentRetriesForChunk = download.retriedChunks
+          .filter(r => r.chunkIndex === chunkIndex)
+          .reduce((sum, r) => sum + (r.attempts - 1), 0);
+        
+        if (currentRetriesForChunk < expectedRetries) {
+          const additionalRetries = expectedRetries - currentRetriesForChunk;
+          download.totalRetries += additionalRetries;
+        }
       }
     } else {
       // Add new retry entry
