@@ -44,6 +44,40 @@ class ExpressServer {
       });
     });
 
+    this.app.get('/api/v1/clients', (req, res) => {
+      const { status } = req.query;
+      let clients = this.wsServer.getConnectedClients();
+      
+      // Filter by status if provided
+      if (status === 'connected') {
+        clients = clients.filter(client => {
+          const clientInfo = this.wsServer.clients.get(client.id);
+          return clientInfo && clientInfo.ws.readyState === 1; // WebSocket.OPEN
+        });
+      }
+      
+      // Transform to match required response format
+      const clientList = clients.map(client => {
+        const clientInfo = this.wsServer.clients.get(client.id);
+        return {
+          clientId: client.registeredId || client.id,
+          connectedAt: client.connectedAt.toISOString(),
+          lastHeartbeat: clientInfo ? clientInfo.lastHeartbeat.toISOString() : client.connectedAt.toISOString(),
+          status: clientInfo && clientInfo.ws.readyState === 1 ? 'connected' : 'disconnected',
+          metadata: {
+            ip: client.ip,
+            internalId: client.id
+          }
+        };
+      });
+      
+      res.json({
+        success: true,
+        clients: clientList,
+        total: clientList.length
+      });
+    });
+
     this.app.use((req, res) => {
       res.status(404).json({ error: 'Not found' });
     });
