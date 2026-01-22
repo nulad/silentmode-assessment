@@ -22,7 +22,7 @@ class ChunkManager extends EventEmitter {
    * @param {number} totalChunks - Total number of chunks expected
    */
   initChunkTracking(requestId, totalChunks) {
-    if (!requestId || typeof totalChunks !== 'number' || totalChunks <= 0) {
+    if (!requestId || typeof requestId !== 'string' || typeof totalChunks !== 'number' || totalChunks <= 0) {
       throw new Error('Invalid requestId or totalChunks');
     }
 
@@ -265,6 +265,12 @@ class ChunkManager extends EventEmitter {
   handleChunkTimeout(requestId, chunkIndex) {
     const request = this.requests.get(requestId);
     if (!request) {
+      return;
+    }
+
+    // Check if chunk index is valid
+    if (typeof chunkIndex !== 'number' || chunkIndex < 0 || chunkIndex >= request.totalChunks) {
+      console.log(`[ChunkManager] Invalid chunk index ${chunkIndex} in timeout for request ${requestId}`);
       return;
     }
 
