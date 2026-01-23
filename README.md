@@ -2,6 +2,85 @@
 
 A robust chunk-based file download system with WebSocket communication, automatic retry logic, and comprehensive error handling.
 
+## What Is This?
+
+This project implements a **distributed file download system** where:
+- A **server** coordinates file downloads and manages chunks
+- **Clients** serve files from their local filesystem
+- Files are downloaded **in chunks** for reliability and progress tracking
+- **WebSocket** communication enables real-time bidirectional data transfer
+- **Automatic retry logic** handles network failures gracefully
+
+Think of it as a reverse download system: instead of clients downloading from a server, the server downloads files from connected clients.
+
+## Features
+
+### Core Functionality
+
+**Chunk-Based File Transfer**
+- Files are split into configurable chunks (default: 1MB)
+- Each chunk is transferred independently with checksum validation
+- Enables download resumption and parallel processing
+- Reduces memory footprint for large files
+
+**WebSocket Communication**
+- Real-time bidirectional messaging between server and clients
+- Persistent connections with automatic heartbeat/ping-pong
+- Low-latency chunk requests and transfers
+- Automatic reconnection with exponential backoff
+
+**Intelligent Retry Mechanism**
+- Failed chunks are automatically retried with exponential backoff
+- Configurable retry attempts (default: 3 attempts)
+- Jitter to prevent thundering herd problems
+- Detailed retry statistics and tracking
+
+**Progress Tracking**
+- Real-time download progress with percentage and bytes transferred
+- Per-chunk status tracking (pending, received, failed, retried)
+- Detailed statistics: chunks received, total chunks, retry counts
+- Progress available via REST API and CLI
+
+### API & Interfaces
+
+**REST API**
+- Full HTTP API for managing downloads and clients
+- Health check endpoints for monitoring
+- JSON responses with detailed status information
+- Support for listing, creating, and querying downloads
+
+**CLI Tool**
+- Command-line interface for triggering downloads
+- Interactive progress bars with real-time updates
+- Client and download management commands
+- Health check and status monitoring
+
+**WebSocket Protocol**
+- Well-defined message types for all operations
+- Client registration and discovery
+- Download lifecycle management (request, transfer, complete, cancel)
+- Error handling and reporting
+
+### Reliability & Monitoring
+
+**Error Handling**
+- Graceful handling of network failures
+- Client disconnection recovery
+- File not found and permission errors
+- Timeout management for stalled downloads
+
+**Health Monitoring**
+- Server health check endpoints
+- Client connection status tracking
+- Active download monitoring
+- Detailed logging (debug, info, warn, error levels)
+
+**Testing**
+- Comprehensive unit tests with Jest
+- Full end-to-end test suite
+- Automated test files generation
+- WebSocket protocol validation tests
+
 ## TL;DR - Quick Commands
 
 ```bash
@@ -30,15 +109,17 @@ This guide provides detailed step-by-step instructions.
 
 ## Table of Contents
 
+- [What Is This?](#what-is-this)
+- [Features](#features)
 - [Prerequisites](#prerequisites)
 - [Installation](#installation)
 - [Running the Application](#running-the-application)
 - [Running E2E Tests](#running-e2e-tests)
 - [Running Unit Tests](#running-unit-tests)
 - [Architecture](#architecture)
-- [API Documentation](#api-documentation)
 - [Configuration](#configuration)
 - [Troubleshooting](#troubleshooting)
+- [Additional Resources](#additional-resources)
 
 ## Prerequisites
 
@@ -396,15 +477,6 @@ silentmode-assessment/
 │   └── e2e-test.sh        # End-to-end test script
 └── README.md              # This file
 ```
-
-## Key Features
-
-- **Chunk-based Downloads**: Files are split into 1MB chunks for efficient transfer
-- **WebSocket Communication**: Real-time bidirectional communication
-- **Automatic Retry Logic**: Failed chunks are automatically retried with exponential backoff
-- **Progress Tracking**: Real-time download progress with percentage and bytes transferred
-- **Health Monitoring**: Built-in health checks and monitoring endpoints
-- **Comprehensive Testing**: Unit tests and full E2E test suite
 
 ## Troubleshooting
 
